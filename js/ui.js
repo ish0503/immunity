@@ -11,19 +11,57 @@
   let drag = null;     // 끌고 있는 항원
   let hoverPos = null;
   let logShown = 0;
+  const view = { s: 1, ox: 0, oy: 0 }; // 확대 배율과 화면 왼쪽 위의 세계 좌표
+  let big = false, paletteOn = true;
+  let baseK = 1; // 캔버스 픽셀 / 세계 좌표
 
   function parseBlood(v) { return { bloodType: v.replace(/[+−-]/g, ''), rh: v.includes('+') }; }
 
   // ───────── 고해상도 캔버스 ─────────
   function fitCanvas() {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    canvas.width = IMM.W * dpr; canvas.height = IMM.H * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const dpr = Math.min(2.5, window.devicePixelRatio || 1);
+    const wrap = $('canvasWrap');
+    let cssW;
+    if (big) {
+      const r = wrap.getBoundingClientRect();
+      // 항원 상자가 아래 띠면 그만큼 높이를 빼고, 옆 띠(낮은 가로 화면)면 레이아웃 여백이 이미 처리함
+      const dock = $('paletteDock'), bottomDock = paletteOn && dock.getBoundingClientRect().top > window.innerHeight / 2;
+      const avW = wrap.parentElement.clientWidth, avH = Math.max(120, window.innerHeight - r.top - (bottomDock ? dock.offsetHeight : 0) - 6);
+      cssW = Math.min(avW, avH * IMM.W / IMM.H);
+      canvas.style.width = cssW + 'px'; canvas.style.height = (cssW * IMM.H / IMM.W) + 'px';
+    } else {
+      canvas.style.width = ''; canvas.style.height = '';
+      cssW = wrap.clientWidth || IMM.W;
+    }
+    // 확대해도 선명하도록 화면 크기 × 확대율에 맞춘 해상도 (최대 2400px)
+    const px = Math.min(2400, Math.max(IMM.W, Math.round(cssW * dpr * Math.min(view.s, 2))));
+    canvas.width = px; canvas.height = Math.round(px * IMM.H / IMM.W);
+    baseK = canvas.width / IMM.W;
+    applyView();
     const cw = chart.clientWidth || 300;
     chart.width = cw * dpr; chart.height = Math.round(cw * 0.46) * dpr;
     cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
-  window.addEventListener('resize', () => { fitCanvas(); drawChart(); });
+  function applyView() {
+    const k = baseK * view.s;
+    ctx.setTransform(k, 0, 0, k, -view.ox * k, -view.oy * k);
+  }
+  function clampView() {
+    view.s = Math.max(1, Math.min(4, view.s));
+    view.ox = Math.max(0, Math.min(IMM.W - IMM.W / view.s, view.ox));
+    view.oy = Math.max(0, Math.min(IMM.H - IMM.H / view.s, view.oy));
+  }
+  // 화면 위 한 점(세계 좌표 wx, wy)을 고정한 채 배율 변경
+  function zoomAt(wx, wy, ns) {
+    const old = view.s; ns = Math.max(1, Math.min(4, ns));
+    view.ox = wx - (wx - view.ox) * old / ns;
+    view.oy = wy - (wy - view.oy) * old / ns;
+    view.s = ns; clampView();
+    if (Math.abs(ns - old) > 0.3 || ns === 1) fitCanvas(); else applyView();
+    $('zFit').disabled = view.s === 1;
+  }
+  let resizeT = 0;
+  window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { fitCanvas(); drawChart(); }, 80); });
 
   // ───────── 팔레트 ─────────
   function buildPalette() {
@@ -58,7 +96,8 @@
 
   // ───────── 드래그 ─────────
   function startDrag(e, d, el) {
-    e.preventDefault();
+    if (e.pointerType === 'mouse') e.preventDefault();
+    const lift = e.pointerType === 'touch' ? 46 : 0; // 손가락에 가리지 않게 위로 띄움
     const start = { x: e.clientX, y: e.clientY };
     let moved = false;
     const ghost = $('ghost');
@@ -67,26 +106,30 @@
         moved = true; drag = d; ghost.hidden = false; ghost.textContent = d.name;
       }
       if (moved) {
-        ghost.style.left = ev.clientX + 'px'; ghost.style.top = ev.clientY + 'px';
-        hoverPos = toWorld(ev.clientX, ev.clientY);
+        ghost.style.left = ev.clientX + 'px'; ghost.style.top = (ev.clientY - lift) + 'px';
+        hoverPos = toWorld(ev.clientX, ev.clientY - lift);
       }
     };
+    const cleanup = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', cancel);
+      ghost.hidden = true; drag = null; hoverPos = null;
+    };
+    // 가로 스크롤 등으로 브라우저가 터치를 가져가면 아무것도 하지 않음
+    const cancel = () => cleanup();
     const up = (ev) => {
-      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up);
-      ghost.hidden = true;
+      cleanup();
       if (moved) {
-        const p = toWorld(ev.clientX, ev.clientY);
+        const p = toWorld(ev.clientX, ev.clientY - lift);
         if (p) doDrop(d, p);
       } else select(d, el);
-      drag = null; hoverPos = null;
     };
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', cancel);
   }
 
   function toWorld(cx, cy) {
     const r = canvas.getBoundingClientRect();
     if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return null;
-    return { x: (cx - r.left) / r.width * IMM.W, y: (cy - r.top) / r.height * IMM.H };
+    return { x: view.ox + (cx - r.left) / r.width * IMM.W / view.s, y: view.oy + (cy - r.top) / r.height * IMM.H / view.s };
   }
 
   function routeText(d, p) {
@@ -102,16 +145,98 @@
     if (!running) setHint('일시정지 중입니다. ▶ 재생을 누르면 반응이 진행됩니다.');
   }
 
+  // 캔버스: 탭(투입·설명), 한 손가락/마우스 끌기(확대 상태에서 이동), 두 손가락 핀치(확대)
+  const ptrs = new Map();
+  let gesture = null, tipTimer = 0;
   canvas.addEventListener('pointerdown', (e) => {
-    if (!selected) return;
-    const p = toWorld(e.clientX, e.clientY); if (!p) return;
-    doDrop(selected, p);
+    canvas.setPointerCapture(e.pointerId);
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (ptrs.size === 1) gesture = { type: 'tap', sx: e.clientX, sy: e.clientY, ox: view.ox, oy: view.oy, t: performance.now() };
+    else if (ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()];
+      const mid = toWorld((a.x + b.x) / 2, (a.y + b.y) / 2) || { x: IMM.W / 2, y: IMM.H / 2 };
+      gesture = { type: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, s0: view.s, mid };
+      $('tooltip').hidden = true;
+    }
   });
   canvas.addEventListener('pointermove', (e) => {
-    const p = toWorld(e.clientX, e.clientY);
-    hoverPos = drag || selected ? p : null;
-    showTip(p, e);
+    if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (gesture && gesture.type === 'pinch' && ptrs.size >= 2) {
+      const [a, b] = [...ptrs.values()];
+      zoomAt(gesture.mid.x, gesture.mid.y, gesture.s0 * Math.hypot(a.x - b.x, a.y - b.y) / gesture.d0);
+      return;
+    }
+    if (gesture && (gesture.type === 'tap' || gesture.type === 'pan') && ptrs.size === 1) {
+      const dx = e.clientX - gesture.sx, dy = e.clientY - gesture.sy;
+      if (gesture.type === 'tap' && Math.hypot(dx, dy) > 8 && view.s > 1) gesture.type = 'pan';
+      if (gesture.type === 'pan') {
+        const r = canvas.getBoundingClientRect();
+        view.ox = gesture.ox - dx / r.width * IMM.W / view.s;
+        view.oy = gesture.oy - dy / r.height * IMM.H / view.s;
+        clampView(); applyView();
+        return;
+      }
+    }
+    if (e.pointerType === 'mouse') {
+      const p = toWorld(e.clientX, e.clientY);
+      hoverPos = drag || selected ? p : null;
+      showTip(p, e);
+    }
   });
+  const endPtr = (e) => {
+    const g = gesture;
+    ptrs.delete(e.pointerId);
+    if (ptrs.size === 0) {
+      gesture = null;
+      if (g && g.type === 'tap' && e.type === 'pointerup' && Math.hypot(e.clientX - g.sx, e.clientY - g.sy) <= 8) {
+        const p = toWorld(e.clientX, e.clientY);
+        if (!p) return;
+        if (selected) doDrop(selected, p);
+        else if (e.pointerType !== 'mouse') {
+          showTip(p, e);
+          clearTimeout(tipTimer); tipTimer = setTimeout(() => { $('tooltip').hidden = true; }, 4000);
+        }
+      }
+    } else if (ptrs.size === 1 && g && g.type === 'pinch') {
+      const [a] = [...ptrs.values()];
+      gesture = { type: 'pan', sx: a.x, sy: a.y, ox: view.ox, oy: view.oy };
+    }
+  };
+  canvas.addEventListener('pointerup', endPtr);
+  canvas.addEventListener('pointercancel', endPtr);
+  canvas.addEventListener('wheel', (e) => {
+    // 크게 보기에서는 휠만으로, 평소에는 Ctrl(⌘)+휠로 확대 (페이지 스크롤 방해 안 함)
+    if (!big && !e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    const p = toWorld(e.clientX, e.clientY); if (!p) return;
+    zoomAt(p.x, p.y, view.s * Math.exp(-e.deltaY * 0.0015));
+  }, { passive: false });
+  $('zIn').addEventListener('click', () => zoomAt(view.ox + IMM.W / view.s / 2, view.oy + IMM.H / view.s / 2, view.s * 1.5));
+  $('zOut').addEventListener('click', () => zoomAt(view.ox + IMM.W / view.s / 2, view.oy + IMM.H / view.s / 2, view.s / 1.5));
+  $('zFit').addEventListener('click', () => zoomAt(0, 0, 1));
+  $('zFit').disabled = true;
+
+  // ───────── 크게 보기 ─────────
+  function setBig(on) {
+    big = on;
+    document.body.classList.toggle('big', on);
+    $('btnBig').textContent = on ? '✕ 크게 보기 끝내기' : '⛶ 크게 보기';
+    $('btnBig').setAttribute('aria-pressed', String(on));
+    const fs = document.fullscreenElement;
+    if (on && !fs && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+    if (!on && fs && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    requestAnimationFrame(() => { fitCanvas(); drawChart(); });
+  }
+  $('btnBig').addEventListener('click', () => setBig(!big));
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && big) setBig(false); });
+  $('btnPalette').addEventListener('click', () => {
+    paletteOn = !paletteOn;
+    document.body.classList.toggle('no-palette', !paletteOn);
+    $('btnPalette').textContent = paletteOn ? '항원 상자 숨기기' : '항원 상자 보이기';
+    $('btnPalette').setAttribute('aria-pressed', String(paletteOn));
+    requestAnimationFrame(fitCanvas);
+  });
+
   canvas.addEventListener('pointerleave', () => { $('tooltip').hidden = true; if (!drag) hoverPos = null; });
 
   // ───────── 설명 풍선 ─────────
@@ -212,6 +337,7 @@
   document.addEventListener('keydown', (e) => {
     if (e.target.matches('input, select, textarea')) return;
     if (e.code === 'Space' && !e.target.matches('button')) { e.preventDefault(); $('btnPlay').click(); }
+    if (e.key === 'Escape' && big && !selected) setBig(false);
     if (e.key === 'Escape' && selected) { selected = null; document.querySelectorAll('.agent.sel').forEach(x => x.classList.remove('sel')); setHint(''); }
   });
 
@@ -233,6 +359,7 @@
   function updatePanel() {
     const s = sim.stats;
     $('dayLabel').textContent = sim.day.toFixed(1) + '일째';
+    $('mini').textContent = `건강 ${Math.round(Math.max(0, sim.health))} · ${sim.temp.toFixed(1)}℃` + (sim.hivEver ? ` · CD4 ${s.cd4}` : '') + ((s.virus || s.bact || s.protist) ? ` · 병원체 ${(s.virus || 0) + (s.bact || 0) + (s.protist || 0)}` : '');
     const h = Math.max(0, sim.health);
     $('vHealth').textContent = Math.round(h);
     const bh = $('bHealth'); bh.style.width = h + '%';
@@ -357,7 +484,8 @@
     const cur = drag || selected;
     if (cur && hoverPos) preview = { x: hoverPos.x, y: hoverPos.y, text: `${cur.name} → ${routeText(cur, hoverPos)}` };
     const hg = cur && hoverPos && hoverPos.y < IMM.Z.tisTop ? sim.gateAt(hoverPos.x, hoverPos.y) : null;
-    IMM.draw(ctx, sim, now / 1000, { labels, dropPreview: preview, hoverGate: hg });
+    applyView();
+    IMM.draw(ctx, sim, now / 1000, { labels, dropPreview: preview, hoverGate: hg, zoom: view.s });
     panelT += dt; chartT += dt;
     if (panelT > 0.2) { panelT = 0; updatePanel(); }
     if (chartT > 0.5) { chartT = 0; drawChart(); }
@@ -366,6 +494,10 @@
 
   IMM.app = { get sim() { return sim; } }; // 디버깅용
   buildPalette(); buildLegend(); fitCanvas(); updatePanel(); drawChart();
+  if (window.ResizeObserver) new ResizeObserver(() => { if (!big) fitCanvas(); }).observe($('canvasWrap'));
+  // 좁은 화면에서는 기록·기억 패널을 접어서 시작
+  if (window.matchMedia('(max-width: 820px)').matches) document.querySelectorAll('details[data-k="log"], details[data-k="mem"]').forEach(d => { d.open = false; });
+  document.querySelectorAll('details[data-k="chart"]').forEach(d => d.addEventListener('toggle', () => { if (d.open) { fitCanvas(); drawChart(); } }));
   requestAnimationFrame(frame);
   try { if (!localStorage.getItem('imm-help-seen')) { $('help').showModal(); localStorage.setItem('imm-help-seen', '1'); } } catch (e) { $('help').showModal(); }
 })();
