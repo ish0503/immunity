@@ -61,11 +61,19 @@
     for (const [col, a] of BF) { if (!a.length) continue; ctx.beginPath(); for (let i = 0; i < a.length; i += 3) { ctx.moveTo(a[i] + a[i + 2], a[i + 1]); ctx.arc(a[i], a[i + 1], a[i + 2], 0, TAU); } ctx.fillStyle = col; ctx.fill(); a.length = 0; }
     for (const [col, a] of BS) { if (!a.length) continue; ctx.beginPath(); for (let i = 0; i < a.length; i += 3) { ctx.moveTo(a[i] + a[i + 2], a[i + 1]); ctx.arc(a[i], a[i + 1], a[i + 2], 0, TAU); } ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.stroke(); a.length = 0; }
   }
-  const MID_R = { virus: 3.6, bact: 4, protist: 5, rbc: 6.5, vaccine: 3.5 };
+  const MID_R = { virus: 3.6, bact: 4, protist: 5, rbc: 6.5, vaccine: 3.5, fungus: 4 };
+  const BL = new Map();
+  function bline(col, x0, y0, x1, y1) { let a = BL.get(col); if (!a) BL.set(col, (a = [])); a.push(x0, y0, x1, y1); }
+  function flushLines(ctx, w) {
+    ctx.lineCap = 'round';
+    for (const [col, a] of BL) { if (!a.length) continue; ctx.beginPath(); for (let i = 0; i < a.length; i += 4) { ctx.moveTo(a[i], a[i + 1]); ctx.lineTo(a[i + 2], a[i + 3]); } ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke(); a.length = 0; }
+  }
   function midPathogen(p, sim) {
     const d = p.def;
     const col = d.beh === 'trypano' ? IMM.agColor(p.ags[0]) : (d.color || '#ccc');
     const r = d.beh === 'amoeba' ? 10 : MID_R[d.cat] || 4;
+    if (p.st === 'hypha') { bline(d.color, p.x, p.y, p.x + Math.cos(p.ang) * p.len, p.y + Math.sin(p.ang) * p.len); bc(d.color, p.x, p.y, 2); return; }
+    if (d.capsule && d.cat === 'fungus') bring('rgba(201,180,255,0.55)', p.x, p.y, 6.5);
     bc(p.coat && d.beh === 'rbc' ? '#c23a4a' : col, p.x, p.y, r);
     if (p.coat) bring(d.beh === 'rbc' ? '#ffe08a' : '#9ad0ff', p.x, p.y, r + 2.6);
   }
@@ -498,7 +506,11 @@
     if (p.st === 'blocked') return drawBlocked(ctx, p, t);
     if (p.st === 'liver') { circle(ctx, x, y, 3.5 + Math.sin(t * 3 + p.ph) * 0.8, '#ff9db0', 'rgba(255,255,255,0.6)', 1); return; }
     const col = d.color || '#ccc';
-    if (far) { ctx.fillStyle = d.beh === 'trypano' && sim ? IMM.agColor(p.ags[0]) : col; const s = d.cat === 'protist' ? 8 : 6; ctx.fillRect(x - s / 2, y - s / 2, s, s); return; }
+    if (far) {
+      ctx.fillStyle = d.beh === 'trypano' && sim ? IMM.agColor(p.ags[0]) : col;
+      if (p.st === 'hypha') { ctx.strokeStyle = col; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(p.ang) * p.len, y + Math.sin(p.ang) * p.len); ctx.stroke(); }
+      const s = d.cat === 'protist' ? 8 : 6; ctx.fillRect(x - s / 2, y - s / 2, s, s); return;
+    }
     switch (d.beh) {
       case 'lytic': case 'hiv': drawVirus(ctx, p, t, col); break;
       case 'bact': case 'tb': drawBact(ctx, p, t, col); break;
@@ -520,17 +532,49 @@
         if (p.hp < 6) { ctx.fillStyle = '#ff6b6b'; ctx.fillRect(x - 8, y - 16, 16 * Math.max(0, p.hp / 6), 2); }
         break;
       }
+      case 'fungus': drawFungus(ctx, p, t, col); break;
       case 'rbc': drawDonorRbc(ctx, p, t, sim); break;
       case 'vaccine': {
         ctx.save(); ctx.translate(x, y); ctx.rotate(t + p.ph); ctx.fillStyle = col; ctx.fillRect(-3, -3, 6, 6); ctx.restore(); break;
       }
     }
     if (p.coat && d.beh !== 'rbc') coatMarks(ctx, x, y, d.cat === 'protist' ? 6 : 4, t + p.ph, '#9ad0ff');
-    else if (p.opso && d.cat === 'bact') { circle(ctx, x + 4, y - 3, 1.2, '#ffb366'); circle(ctx, x - 4, y + 2, 1.2, '#ffb366'); }
+    else if (p.opso && (d.cat === 'bact' || d.cat === 'fungus')) { circle(ctx, x + 4, y - 3, 1.2, '#ffb366'); circle(ctx, x - 4, y + 2, 1.2, '#ffb366'); }
+  }
+
+  // 곰팡이: 효모(출아하는 타원) · 분생자(작은 포자 사슬) · 균사(격벽이 있는 실, 끝에서 자람)
+  function drawFungus(ctx, p, t, col) {
+    const x = p.x, y = p.y, d = p.def;
+    if (p.st === 'hypha') {
+      const len = Math.max(3, p.len || 0), a = p.ang || 0, ex = x + Math.cos(a) * len, ey = y + Math.sin(a) * len;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(40,30,10,0.45)'; ctx.lineWidth = 4.6; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(ex, ey); ctx.stroke();
+      // 격벽
+      ctx.strokeStyle = 'rgba(60,50,20,0.6)'; ctx.lineWidth = 1; ctx.beginPath();
+      const nx = -Math.sin(a), ny = Math.cos(a);
+      for (let s = 7; s < len - 2; s += 7) { const px = x + Math.cos(a) * s, py = y + Math.sin(a) * s; ctx.moveTo(px - nx * 1.6, py - ny * 1.6); ctx.lineTo(px + nx * 1.6, py + ny * 1.6); }
+      ctx.stroke();
+      if (!p.grown) circle(ctx, ex, ey, 2.2, '#fff8e0');
+      if (p.hp < d.hp) { ctx.fillStyle = '#ff6b6b'; ctx.fillRect(x - 6, y - 8, 12 * Math.max(0, p.hp / d.hp), 2); }
+      return;
+    }
+    if (p.st === 'conidia') {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(p.ph);
+      for (let i = 0; i < 3; i++) circle(ctx, (i - 1) * 3.2, 0, 1.7, col, 'rgba(40,60,30,0.6)', 0.6);
+      ctx.restore(); return;
+    }
+    if (d.capsule) circle(ctx, x, y, 7, 'rgba(201,180,255,0.16)', 'rgba(201,180,255,0.55)', 1);
+    ctx.save(); ctx.translate(x, y); ctx.rotate(p.ph);
+    ctx.fillStyle = col; ctx.strokeStyle = 'rgba(90,70,30,0.6)'; ctx.lineWidth = 0.7;
+    ctx.beginPath(); ctx.ellipse(0, 0, 3.6, 2.8, 0, 0, TAU); ctx.fill(); ctx.stroke();
+    const bud = Math.min(1, (p.t || 0) / (d.dbl || 1));
+    if (bud > 0.3) { ctx.beginPath(); ctx.ellipse(3.6 + bud * 1.6, 0, 1.8 * bud + 0.4, 1.5 * bud + 0.3, 0, 0, TAU); ctx.fill(); ctx.stroke(); }
+    ctx.restore();
   }
 
   function drawVirus(ctx, p, t, col) {
-    const x = p.x, y = p.y, id = p.def.id;
+    const x = p.x, y = p.y, id = p.def.kind;
     if (id === 'flu' || id === 'hiv') {
       const r = id === 'hiv' ? 3.6 : 3.4;
       ctx.strokeStyle = col; ctx.lineWidth = 1;
@@ -549,7 +593,7 @@
   }
 
   function drawBact(ctx, p, t, col) {
-    const x = p.x, y = p.y, id = p.def.id;
+    const x = p.x, y = p.y, id = p.def.kind;
     if (id === 'staph') { circle(ctx, x, y, 3.6, col); circle(ctx, x - 1, y - 1, 1.2, 'rgba(255,255,255,0.35)'); }
     else if (id === 'pneumo') {
       if (!p.coat) circle(ctx, x, y, 7, 'rgba(0,144,255,0.18)', 'rgba(120,190,255,0.5)', 1);
@@ -900,13 +944,13 @@
     if (mid) {
       for (const c of sim.cells) if ((c.type === 'macro' || c.type === 'dc') && IN(c.x, c.y, 34)) midCell(c);
       flush(ctx);
-      for (const p of sim.paths) if (IN(p.x, p.y, 16)) { if (p.st === 'blocked' || p.st === 'liver') drawPathogen(ctx, p, t, sim, false); else midPathogen(p, sim); }
-      flush(ctx);
+      for (const p of sim.paths) if (IN(p.x, p.y, p.st === 'hypha' ? 40 : 16)) { if (p.st === 'blocked' || p.st === 'liver') drawPathogen(ctx, p, t, sim, false); else midPathogen(p, sim); }
+      flushLines(ctx, 3); flush(ctx);
       for (const c of sim.cells) if (c.type !== 'macro' && c.type !== 'dc' && IN(c.x, c.y, 10)) midCell(c);
       flush(ctx);
     } else {
       for (const c of sim.cells) if ((c.type === 'macro' || c.type === 'dc') && IN(c.x, c.y, 34)) drawCell(ctx, c, t, sim, far);
-      for (const p of sim.paths) if (IN(p.x, p.y, 16)) drawPathogen(ctx, p, t, sim, far);
+      for (const p of sim.paths) if (IN(p.x, p.y, p.st === 'hypha' ? 40 : 16)) drawPathogen(ctx, p, t, sim, far);
       for (const c of sim.cells) if (c.type !== 'macro' && c.type !== 'dc' && IN(c.x, c.y, 10)) drawCell(ctx, c, t, sim, far);
     }
     for (const a of sim.abp) { if (!IN(a.x, a.y, 6)) continue; ctx.globalAlpha = Math.max(0, 1 - a.t / a.life); ab(ctx, a.x, a.y, 3.4, a.rot + a.t, a.col); }
@@ -967,7 +1011,9 @@
   IMM.drawIcon = function (ctx, def, size) {
     ctx.clearRect(0, 0, size, size);
     ctx.save(); ctx.translate(size / 2, size / 2); ctx.scale(size / 24, size / 24);
-    const p = { def, ags: def.ags || [def.ag], x: 0, y: 0, vx: 1, vy: 0, st: def.beh === 'malaria' ? 'spz' : 'free', ph: 0.4, hp: 6, coat: false };
+    const p = { def, ags: def.ags || [def.ag], x: 0, y: 0, vx: 1, vy: 0, st: def.beh === 'malaria' ? 'spz' : def.cat === 'fungus' ? def.form : 'free', ph: 0.4, hp: 6, coat: false, t: 0.8 };
+    if (def.kind === 'candida') { p.st = 'hypha'; p.x = -8; p.y = 4; p.ang = -0.5; p.len = 16; p.hp = def.hp; ctx.scale(1.2, 1.2); drawPathogen(ctx, p, 0); drawPathogen(ctx, { ...p, st: 'yeast', x: 4, y: 4, ang: 0, len: 0 }, 0); ctx.restore(); return; }
+    if (def.kind === 'asperg') { ctx.scale(1.3, 1.3); for (const q of [[-4, -3, 0.2], [3, 3, -0.6], [-1, 5, 1.2]]) drawPathogen(ctx, { ...p, x: q[0], y: q[1], ph: q[2] }, 0); ctx.restore(); return; }
     if (def.beh === 'malaria') { drawHostRbc(ctx, { x: 0, y: 0, rot: 0, inf: { t: 1.5 } }, 0); }
     else if (def.beh === 'amoeba') { ctx.scale(0.8, 0.8); drawPathogen(ctx, p, 0); }
     else { ctx.scale(def.cat === 'virus' ? 1.6 : 1.3, def.cat === 'virus' ? 1.6 : 1.3); drawPathogen(ctx, p, 0); }

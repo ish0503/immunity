@@ -56,6 +56,9 @@
     tb: '결핵균 항원',
     mal: '말라리아 원충 표면 단백질',
     amoeba: '이질아메바 렉틴',
+    cand: '칸디다 세포벽 만난·β-글루칸',
+    asp: '아스페르길루스 갈락토만난',
+    crypto: '크립토코쿠스 협막 다당류(GXM)',
   };
 
   IMM.agName = function (ag) {
@@ -64,6 +67,7 @@
     if (base === 'flu') return '인플루엔자 HA-' + v + '형';
     if (base === 'hiv') return 'HIV 외피 변이 ' + v;
     if (base === 'tryp') return '트리파노소마 VSG-' + v;
+    if (IMM.MUT_AG && IMM.MUT_AG[ag]) { const m = IMM.MUT_AG[ag]; const b = m.base === 'flu' ? '인플루엔자 HA' : (IMM.AG_NAMES[m.base] || m.base); return b + ' 변이주 M' + m.n; }
     return ag;
   };
 
@@ -71,6 +75,7 @@
   const AG_COLORS = {
     A: '#e5484d', B: '#3e63dd', D: '#d6409f', rhino: '#30a46c', noro: '#8db600', herpes: '#f76b15',
     pneumo: '#0090ff', staph: '#ffb224', salm: '#ab4aba', tb: '#a18072', mal: '#e54666', amoeba: '#12a594',
+    cand: '#d9b44a', asp: '#6f9a55', crypto: '#a78bfa',
   };
   const VAR_PALETTE = ['#00a2c7', '#6e56cf', '#e93d82', '#29a383', '#d6a000', '#7c66dc', '#f2555a', '#5eb1ef'];
   IMM.agColor = function (ag) {
@@ -80,6 +85,7 @@
     if (base === 'flu') return ['#00a2c7', '#0d74ce', '#5eb1ef', '#113264'][(n - 1) % 4];
     if (base === 'hiv') return ['#8e4ec6', '#c084fc', '#6e56cf', '#b658c4', '#9a5cd0'][(n - 1) % 5];
     if (base === 'tryp') return VAR_PALETTE[(n - 1) % VAR_PALETTE.length];
+    if (IMM.MUT_AG && IMM.MUT_AG[ag]) return ['#f2555a', '#29a383', '#d6a000', '#e93d82', '#7c66dc', '#00a2c7'][(IMM.MUT_AG[ag].n - 1) % 6];
     return '#888';
   };
 
@@ -139,6 +145,17 @@
       dbl: 2.2, cap: 18, color: '#12a594',
       desc: '포낭 상태로 위산을 견딤. 너무 커서 탐식되지 않고 접촉한 세포(호중구 포함)를 녹여 죽임. 보체·항체·여러 면역세포의 협공이 필요.' },
 
+    // 곰팡이 (진균)
+    { id: 'candida', cat: 'fungus', name: '칸디다 (효모↔균사)', ag: 'cand', n: 14, beh: 'fungus', route: 'gut', form: 'yeast', hyphae: true,
+      dbl: 0.8, tox: 0.004, cap: 200, hp: 3, color: '#efe0b8',
+      desc: '평소 장·입·피부에 사는 효모. 몸 안에 들어오면 체온에서 균사로 바뀌어 상피를 뚫고(캔디다라이신 독소) 들어감. 균사는 너무 길어 탐식이 안 되고 호중구가 둘러싸 죽임. 보조 T세포의 Th17(IL-17)이 호중구를 불러 모으는 핵심 → AIDS에서 아구창·식도염.' },
+    { id: 'asperg', cat: 'fungus', name: '아스페르길루스 (포자 흡입)', ag: 'asp', n: 28, beh: 'fungus', route: 'resp', form: 'conidia', hyphae: true, angio: true,
+      dbl: 1.0, tox: 0.012, cap: 120, hp: 5, color: '#7fa36b',
+      desc: '공기 중 포자(분생자)가 작아서 기도 깊숙이 들어옴. 대식세포가 포자를 잘 먹어 치우지만, 남은 포자가 발아하면 균사가 조직과 혈관벽을 뚫고 자람(혈관 침습). 호중구가 균사를 막는 주역이라 호중구가 부족하면 치명적.' },
+    { id: 'crypto', cat: 'fungus', name: '크립토코쿠스 (협막 효모)', ag: 'crypto', n: 14, beh: 'fungus', route: 'resp', form: 'yeast', capsule: true,
+      dbl: 1.0, tox: 0.012, cap: 150, hp: 3, color: '#c9b4ff',
+      desc: '두꺼운 다당류 협막으로 탐식을 피하고, 대식세포에 먹혀도 다시 빠져나옴(vomocytosis). Th1 보조 T세포가 대식세포를 활성화해야 죽음. 혈액을 타고 퍼져 면역 결핍 환자에게 뇌수막염을 일으킴.' },
+
     // 백신
     { id: 'vacFlu', cat: 'vaccine', name: '인플루엔자 백신', ag: 'flu', n: 22, beh: 'vaccine', route: 'tissue', color: '#5eb1ef',
       desc: '증식하지 않는 불활성화 바이러스 조각(현재 유행형 HA). 위험 없이 기억세포를 만들어 둠.' },
@@ -147,15 +164,69 @@
   ];
 
   IMM.DEF = {};
-  for (const d of IMM.DEFS) IMM.DEF[d.id] = d;
+  for (const d of IMM.DEFS) { IMM.DEF[d.id] = d; d.kind = d.id; }
 
   IMM.CATS = [
     { id: 'rbc', name: '적혈구 (수혈)' },
     { id: 'virus', name: '바이러스' },
     { id: 'bact', name: '세균' },
     { id: 'protist', name: '원생생물' },
+    { id: 'fungus', name: '곰팡이 (진균)' },
     { id: 'vaccine', name: '백신' },
+    { id: 'mutant', name: '내가 만든 변이주 🧬' },
   ];
+
+  // ───────── 돌연변이 실험실: 표면 항원 유전자의 항원 결정부위(에피토프) ─────────
+  // 염기는 DNA 표기(T)로 저장하고, RNA 바이러스는 화면에 U로 보여 준다.
+  const BASES = 'TCAG';
+  const AA = 'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG';
+  IMM.AA3 = { A: 'Ala', R: 'Arg', N: 'Asn', D: 'Asp', C: 'Cys', Q: 'Gln', E: 'Glu', G: 'Gly', H: 'His', I: 'Ile', L: 'Leu', K: 'Lys', M: 'Met', F: 'Phe', P: 'Pro', S: 'Ser', T: 'Thr', W: 'Trp', Y: 'Tyr', V: 'Val', '*': '종결' };
+  IMM.AAKO = { A: '알라닌', R: '아르지닌', N: '아스파라진', D: '아스파트산', C: '시스테인', Q: '글루타민', E: '글루탐산', G: '글리신', H: '히스티딘', I: '아이소류신', L: '류신', K: '라이신', M: '메싸이오닌', F: '페닐알라닌', P: '프롤린', S: '세린', T: '트레오닌', W: '트립토판', Y: '타이로신', V: '발린', '*': '종결 코돈' };
+  IMM.codonAA = function (c) {
+    const i = BASES.indexOf(c[0]) * 16 + BASES.indexOf(c[1]) * 4 + BASES.indexOf(c[2]);
+    return AA[i] || '?';
+  };
+  IMM.translate = function (seq) { let o = ''; for (let i = 0; i + 2 < seq.length; i += 3) o += IMM.codonAA(seq.substr(i, 3)); return o; };
+  IMM.GENES = {
+    flu: { def: 'flu', nuc: 'RNA', gene: 'HA(헤마글루티닌) 유전자 · 항원 결정부위 B', seq: 'TCAAAGTACAACGGCACATTCAAG' },
+    rhino: { def: 'rhino', nuc: 'RNA', gene: 'VP1 캡시드 유전자 · 중화 항원 부위', seq: 'CCAACGGATGTGAACGGAAAAGAG' },
+    noro: { def: 'noro', nuc: 'RNA', gene: 'VP1 캡시드 P2 돌출부 유전자', seq: 'ACCAATGACCGGGGACAACTCGTG' },
+    herpes: { def: 'herpes', nuc: 'DNA', gene: 'gD 당단백질 유전자 · 수용체 결합 부위', seq: 'AAATACGCCCTGGCGGACCCCTCG' },
+    staph: { def: 'staph', nuc: 'DNA', gene: 'ClfA 표면 단백질 유전자', seq: 'GATTCTGGAAGCGACTCAAATACA' },
+    salm: { def: 'salm', nuc: 'DNA', gene: 'FliC 편모 단백질 유전자 (H 항원)', seq: 'AACATCCAGGCTCGTCTGGGTACC' },
+    cand: { def: 'candida', nuc: 'DNA', gene: 'Als3 부착 단백질 유전자', seq: 'GGTGCTACTTGGTATTCTGTTCCA' },
+  };
+  for (const k in IMM.GENES) IMM.GENES[k].aa = IMM.translate(IMM.GENES[k].seq);
+  IMM.agBase = (ag) => String(ag).split(/[:*]/)[0];
+  IMM.MUT_AG = {}; // 변이주 항원 id → { aa, n, base }
+  IMM.epitope = function (ag) {
+    if (IMM.MUT_AG[ag]) return IMM.MUT_AG[ag].aa;
+    const g = IMM.GENES[IMM.agBase(ag)];
+    return g ? g.aa : null;
+  };
+  IMM.aaDiff = function (a, b) { let n = 0; for (let i = 0; i < Math.max(a.length, b.length); i++) if (a[i] !== b[i]) n++; return n; };
+  // 항원 결정부위 아미노산이 하나 바뀔 때마다 항체·기억 B세포의 결합력이 약 절반 아래로 떨어진다고 가정
+  IMM.crossF = function (a, b) { return Math.pow(0.45, IMM.aaDiff(a, b)); };
+  IMM.mutCount = 0;
+  IMM.makeMutant = function (key, seq) {
+    const g = IMM.GENES[key], base = IMM.DEF[g.def];
+    const aa = IMM.translate(seq);
+    const n = ++IMM.mutCount;
+    let ag = null;
+    if (aa === g.aa) ag = base.ag; // 침묵 돌연변이: 단백질이 같으므로 원래 항원과 같음
+    else for (const id in IMM.MUT_AG) { const m = IMM.MUT_AG[id]; if (m.base === key && m.aa === aa) ag = id; }
+    if (!ag) { ag = key + '*' + n; IMM.MUT_AG[ag] = { aa, n, base: key }; }
+    let nb = 0; for (let i = 0; i < seq.length; i++) if (seq[i] !== g.seq[i]) nb++;
+    const nd = IMM.aaDiff(aa, g.aa);
+    const short = base.name.split(' (')[0];
+    const d = Object.assign({}, base, {
+      id: g.def + '_m' + n, pal: 'mutant', name: `${short} 변이주 M${n}`, ag, mutant: true, mutKey: key, seq, aa,
+      color: base.color,
+      desc: `${base.name}의 ${g.gene}에서 염기 ${nb}개를 바꾼 변이주. ` + (nd === 0 ? '아미노산은 그대로(침묵 돌연변이) → 몸은 원래 병원체와 똑같이 인식.' : `항원 결정부위 아미노산 ${nd}개가 달라짐 → 원래 병원체의 기억 세포·항체가 덜 알아봄.`) + ' 나머지 성질은 원래 병원체와 같음.',
+    });
+    IMM.DEFS.push(d); IMM.DEF[d.id] = d;
+    return d;
+  };
 
   IMM.ROUTE_NAMES = { skin: '피부', wound: '상처', resp: '호흡기 점막', gut: '소화관', blood: '혈관', tissue: '근육 주사' };
 })(typeof window !== 'undefined' ? window : globalThis);

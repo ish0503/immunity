@@ -128,7 +128,7 @@
       if (this.selfAgs.has(id)) return null;
       let r = this.ag[id];
       if (r) return r;
-      const base = id.split(':')[0];
+      const base = IMM.agBase(id);
       r = this.ag[id] = {
         id, name: IMM.agName(id), color: IMM.agColor(id), stim: 0, stimI: 0, prime: 0, th: 0, ctl: 0, pm: 0, pg: 0, sw: 0,
         igm: 0, igg: 0, memB: 0, memT: 0, memC: 0, aff: 1, natural: false,
@@ -142,7 +142,33 @@
           r.memB = prev.memB * 0.3; r.memT = prev.memT * 0.6; r.memC = prev.memC * 0.6; r.igg = prev.igg * 0.25;
         }
       }
+      // 돌연변이 실험실 변이주: 항원 결정부위가 얼마나 같은지에 따라 교차 반응
+      this.linkCross(r);
       return r;
+    }
+    linkCross(r) {
+      const ep = IMM.epitope(r.id); if (!ep) return;
+      const fam = IMM.agBase(r.id);
+      let best = null, bf = 0;
+      for (const id in this.ag) {
+        const o = this.ag[id];
+        if (o === r || o.natural || IMM.agBase(id) !== fam) continue;
+        if (!id.includes('*') && !r.id.includes('*')) continue; // 자연 변이(인플루엔자 소변이)는 따로 처리
+        const e2 = IMM.epitope(id); if (!e2) continue;
+        const f = IMM.crossF(ep, e2);
+        if (f < 0.02) continue;
+        (r.xref = r.xref || []).push({ id, f }); (o.xref = o.xref || []).push({ id: r.id, f });
+        const has = o.memB + o.igg + o.memT;
+        if (has > 0.3 && (!best || f * has > bf * (best.memB + best.igg + best.memT))) { best = o; bf = f; }
+      }
+      if (best) {
+        const f = bf;
+        r.memB = Math.max(r.memB, best.memB * f); r.memT = Math.max(r.memT, best.memT * (0.3 + 0.7 * f)); r.memC = Math.max(r.memC, best.memC * (0.3 + 0.7 * f));
+        const nd = IMM.aaDiff(ep, IMM.epitope(best.id));
+        const pct = Math.round(f * 100);
+        if (nd === 0) this.addLog('memory', `${r.name}: 항원 결정부위 아미노산이 ${best.name}와(과) 똑같음 → 기억 세포가 그대로 알아봄`);
+        else this.addLog(f >= 0.3 ? 'memory' : 'danger', `${r.name}: ${best.name}와(과) 항원 결정부위 아미노산 ${nd}개 차이 → 기존 항체·기억 B세포 결합력 약 ${pct}%` + (f < 0.3 ? ' (면역 회피 변이!)' : ' (교차 반응)'));
+      }
     }
     titer(id) { return this.tit[id] || 0; }
     titOf(p) { let t = 0; for (const a of p.ags) { const v = this.tit[a]; if (v > t) t = v; } return t; }
@@ -184,6 +210,7 @@
       if (ag === 'hiv') ag = 'hiv:' + this.variant.hiv;
       if (ag === 'tryp') ag = 'tryp:1';
       const ags = def.ags ? def.ags.slice() : [ag];
+      if (def.mutant && ags[0] && ags[0].includes('*')) this.getAg(ags[0]);
       this.exposures.push({ day: this.day, name: def.name, color: def.color || '#e5484d', id: defId });
 
       let pass = 0;
@@ -246,12 +273,14 @@
       if (gate === 'skin') return def.skinPass != null ? def.skinPass : (def.beh === 'hiv' || def.cat === 'protist' ? 0 : 0.015);
       if (gate === 'resp') {
         if (def.cat === 'protist' || def.beh === 'hiv') return 0;
-        if (def.id === 'tb') return 0.6;
+        if (def.kind === 'tb') return 0.6;
+        if (def.cat === 'fungus') return def.form === 'conidia' ? 0.5 : 0.4; // 작은 포자·효모는 기도 깊숙이 들어감
         return def.cat === 'bact' ? 0.3 : 0.35;
       }
       if (gate === 'gut') {
         if (def.beh === 'hiv') return 0;
         if (def.acidRes) return 0.75;
+        if (def.cat === 'fungus') return 0.35; // 칸디다는 위산에 비교적 강함
         return def.cat === 'virus' ? 0.03 : 0.06;
       }
       return 1;
@@ -269,6 +298,10 @@
       if (b === 'rbc') { p.loc = 'blood'; p.y = clamp(p.y, Z.bloodTop + 10, Z.bloodBot - 10); p.life = 30; }
       if (b === 'vaccine') { p.life = 3.5; }
       if (b === 'bact' || b === 'tb' || b === 'trypano' || b === 'amoeba') p.t = rnd() * (p.def.dbl || 1);
+      if (b === 'fungus') {
+        p.st = p.def.form; p.hp = p.def.hp; p.t = rnd() * p.def.dbl * (p.st === 'conidia' ? 0.3 : 1);
+        p.ang = rr(0.3, Math.PI - 0.3); p.len = 0;
+      }
     }
 
     // ───────── 메인 루프 ─────────
@@ -297,6 +330,13 @@
         const r = this.ag[id];
         this.tit[id] = r.igm * 0.6 + r.igg * r.aff;
       }
+      // 교차 반응: 닮은 항원 결정부위에 대한 항체도 일부 결합
+      for (const id in this.ag) {
+        const r = this.ag[id]; if (!r.xref) continue;
+        let x = 0; for (const q of r.xref) { const o = this.ag[q.id]; if (o) x += (o.igm * 0.6 + o.igg * o.aff) * q.f; }
+        r.xtit = x;
+      }
+      for (const id in this.ag) { const r = this.ag[id]; if (r.xtit) this.tit[id] += r.xtit; }
       // 격자
       this.grid.clear();
       this.tisList = []; this.counts = {}; this.agCount = {};
@@ -306,7 +346,7 @@
           this.counts[p.def.id] = (this.counts[p.def.id] || 0) + 1;
           for (const a of p.ags) this.agCount[a] = (this.agCount[a] || 0) + 1;
         }
-        if (p.st === 'free' || p.st === 'mero' || p.st === 'spz') {
+        if (p.st === 'free' || p.st === 'mero' || p.st === 'spz' || p.st === 'yeast' || p.st === 'conidia' || p.st === 'hypha') {
           this.grid.add(p);
           if (p.loc === 'tis') this.tisList.push(p);
         }
@@ -346,7 +386,7 @@
       for (const id in this.ag) if (this.tit[id] > 0.02 || this.ag[id].natural) tit[id] = this.tit[id];
       const s = this.stats;
       // 처음부터 전부 보관 (그래프를 끌어서 지난 기록을 볼 수 있게)
-      this.hist.push({ day: this.day, tit, load: ((s.virus || 0) + (s.bact || 0) + (s.protist || 0) * 2) * IK, cd4: this.helpF, temp: this.temp, health: this.health });
+      this.hist.push({ day: this.day, tit, load: ((s.virus || 0) + (s.bact || 0) + (s.fungus || 0) + (s.protist || 0) * 2) * IK, cd4: this.helpF, temp: this.temp, health: this.health });
     }
 
     // ───────── 이동 ─────────
@@ -397,7 +437,7 @@
         if (t > 0 && pr(t * 0.9, dt)) {
           p.coat = true;
           if (def.cat === 'virus') this.pop(p.x, p.y - 8, '항체 중화', '#5eb1ef', 'neut' + def.id, 3);
-          else if (def.cat === 'bact') this.pop(p.x, p.y - 8, '옵소닌화', '#5eb1ef', 'ops' + def.id, 3);
+          else if (def.cat === 'bact' || def.cat === 'fungus') this.pop(p.x, p.y - 8, '옵소닌화', '#5eb1ef', 'ops' + def.id, 3);
         }
       }
       switch (def.beh) {
@@ -408,6 +448,7 @@
         case 'malaria': return this.bMalaria(p, ds, dt);
         case 'trypano': return this.bTrypano(p, ds, dt);
         case 'amoeba': return this.bAmoeba(p, ds, dt);
+        case 'fungus': return this.bFungus(p, ds, dt);
         case 'rbc': return this.bRbc(p, ds, dt);
         case 'vaccine': return this.bVaccine(p, ds, dt);
       }
@@ -777,6 +818,95 @@
       }
     }
 
+    // 곰팡이: 효모(출아) · 분생자(포자) · 균사(가지를 치며 자라는 실)
+    bFungus(p, ds, dt) {
+      const def = p.def, hy = p.st === 'hypha';
+      this.dmg += def.tox * (hy ? 2 : 1) * (p.loc === 'blood' ? 2 : 1) * IK;
+      this.stimAg(p.ags[0], dt * 0.006 * IK, false);
+      this.pyro += 0.002 * dt * IK;
+      if (!p.opso && pr(0.3 * this.comp * (def.capsule ? 0.15 : 1), dt)) p.opso = true; // 보체 옵소닌화 (막공격은 두꺼운 세포벽에 안 통함)
+      if (p.hp <= 0) {
+        this.killPath(p);
+        this.spark(p.x, p.y, '#e8e8e8', 8);
+        this.pop(p.x, p.y - 10, '균사 파괴', '#e8e8e8', 'fdead', 3);
+        this.once('fdead' + def.id + this.getEp(p.ags[0]), 'innate', `호중구 여러 개가 ${def.name.split(' ')[0]} 균사를 둘러싸 활성산소·호중구 그물(NET)로 파괴 (너무 커서 삼킬 수 없음)`);
+        return;
+      }
+      const cnt = this.counts[def.id] || 0, cap = def.cap * K;
+      if (p.loc === 'blood') {
+        this.flow(p, ds);
+        if (pr(p.coat || p.opso ? 0.5 : 0.08, dt)) { this.killPath(p, 'spleen', false); return; }
+        if (pr(0.5, dt)) { // 혈류를 타고 다른 조직으로 퍼짐 (파종)
+          p.loc = 'tis'; p.st = def.form === 'conidia' ? 'hypha' : 'yeast'; p.len = 0; p.ang = rr(0.3, Math.PI - 0.3);
+          p.x = rr(20, TX1 - 20); p.y = Z.bloodTop - 20;
+          if (def.kind === 'crypto') this.once('cryptoDis' + this.getEp(p.ags[0]), 'danger', '크립토코쿠스가 혈액을 타고 온몸으로 퍼짐 (파종) → 면역이 약하면 뇌수막염으로 진행');
+        }
+        return;
+      }
+      const th17 = this.th17 || 0;
+      if (p.st === 'conidia') {
+        this.wanderTis(p, 3, ds);
+        p.t += dt * this.replF(def);
+        if (p.t >= 0.7) {
+          p.st = 'hypha'; p.len = 0; p.t = 0;
+          this.once('germ' + this.getEp(p.ags[0]), 'danger', '대식세포에게 먹히지 않은 아스페르길루스 포자가 발아 → 균사가 조직 속으로 뻗어 나감');
+        }
+        return;
+      }
+      if (p.st === 'yeast') {
+        this.wanderTis(p, 5, ds);
+        if (th17 > 0.05 && p.y < EPI_YMAX && pr(0.5 * th17, dt)) { this.killPath(p); this.pop(p.x, p.y - 8, '항균 펩타이드', '#ffd36e', 'defn', 3); return; }
+        p.t += dt * this.replF(def) * Math.max(0, 1 - cnt / cap);
+        if (p.t >= def.dbl && cnt < cap && this.paths.length < PATH_CAP) {
+          p.t = rr(-0.1, 0.1) * def.dbl;
+          const q = this.newPath(def, p.ags, p.x + rr(-4, 4), p.y + rr(-4, 4)); this.initBeh(q); q.st = 'yeast'; q.t = p.t; q.loc = 'tis';
+          this.paths.push(q); this.counts[def.id] = cnt + 1;
+        }
+        if (def.hyphae && pr(0.3, dt)) {
+          p.st = 'hypha'; p.len = 0; p.t = 0;
+          this.once('ytoh' + this.getEp(p.ags[0]), 'danger', '칸디다가 체온에서 효모 → 균사로 형태 전환 → 상피를 뚫고 들어감 (캔디다라이신 독소)');
+        }
+        if (pr(def.capsule ? 0.03 : 0.01, dt) && p.y > Z.bloodTop - 60) { p.loc = 'blood'; p.y = Z.bloodTop + 10; }
+        return;
+      }
+      // 균사: 끝이 자라고 일정 길이마다 가지를 침
+      if (p.grown) return;
+      p.len += dt * 30 / def.dbl * this.replF(def) * Math.max(0.1, 1 - cnt / cap);
+      const tx = p.x + Math.cos(p.ang) * p.len, ty = p.y + Math.sin(p.ang) * p.len;
+      if (def.kind === 'candida' && ty < EPI_YMAX + 6) {
+        const c = this.epiAt(tx, ty);
+        if (c && c.st === 'ok' && pr(1.5, dt)) { this.cellDie(c, 0.08); this.pop(c.x, c.y - 10, '상피 침투', '#efe0b8', 'cinv', 3); }
+      }
+      if (ty > Z.bloodTop - 4) {
+        p.grown = true;
+        if (def.angio && this.paths.length < PATH_CAP) {
+          for (let i = 0; i < 2; i++) { const q = this.newPath(def, p.ags, tx + rr(-6, 6), Z.bloodTop + 10); this.initBeh(q); q.loc = 'blood'; this.paths.push(q); }
+          this.once('angio' + this.getEp(p.ags[0]), 'danger', '아스페르길루스 균사가 혈관 벽을 뚫음 (혈관 침습) → 균사 조각이 혈액을 타고 퍼짐');
+        }
+        return;
+      }
+      if (p.len >= 30) {
+        p.grown = true;
+        for (let i = 0; i < 2 && cnt + i < cap && this.paths.length < PATH_CAP; i++) {
+          const q = this.newPath(def, p.ags, clamp(tx, 6, TX1), clamp(ty, Z.tisTop + 6, Z.bloodTop - 6));
+          q.st = 'hypha'; q.hp = def.hp; q.len = 0; q.loc = 'tis';
+          let a = p.ang + (i ? 1 : -1) * rr(0.3, 0.9);
+          const ny = q.y + Math.sin(a) * 30, nx = q.x + Math.cos(a) * 30;
+          if (ny < Z.tisTop + 6) a = -a; if (nx < 6 || nx > TX1) a = Math.PI - a;
+          q.ang = a; this.paths.push(q);
+        }
+        this.counts[def.id] = cnt + 2;
+      }
+    }
+    th17Level() {
+      let f = 0;
+      for (const id in this.ag) {
+        const b = IMM.agBase(id); if (b !== 'cand' && b !== 'asp' && b !== 'crypto') continue;
+        const r = this.ag[id]; if (this.agCount[id]) f = Math.max(f, Math.min(1, r.th / 10));
+      }
+      return f * Math.max(0.05, this.helpF);
+    }
+
     // ───────── 면역 세포 ─────────
     ease(p) {
       const d = p.def;
@@ -786,6 +916,12 @@
       else if (d.beh === 'vaccine') e = 0.6;
       else if (d.beh === 'trypano') e = p.coat ? 1 : 0.04;
       else if (p.st === 'mero') e = p.coat ? 1 : 0.1;
+      else if (d.cat === 'fungus') {
+        if (p.st === 'hypha') return 0; // 너무 길어서 삼킬 수 없음
+        if (d.capsule) e = p.coat ? 0.8 : 0.04;
+        else e = p.st === 'conidia' ? 1 : 0.5;
+        if (p.opso) e *= 1.5; if (p.coat && !d.capsule) e *= 2;
+      }
       return e;
     }
 
@@ -825,6 +961,17 @@
       if (e <= 0 || !pr(rate * e, dt)) return false;
       c.eaten++;
       this.spark(p.x, p.y, c.type === 'neut' ? '#f1f1f1' : '#f5d0a9', 4);
+      if (p.def.kind === 'crypto' && c.type === 'macro') {
+        const r = this.ag[p.ags[0]];
+        if (rnd() > Math.min(0.9, (r ? r.th : 0) / 12)) {
+          p.x += rr(-16, 16); p.y += rr(-10, 10);
+          this.stimAg(p.ags[0], 0.02 * IK, false);
+          this.pop(p.x, p.y - 8, '탈출', '#c9b4ff', 'vomo', 3);
+          this.once('vomo' + this.getEp(p.ags[0]), 'danger', '크립토코쿠스가 대식세포에 먹혔다가 그대로 빠져나옴 (vomocytosis) → Th1 보조 T세포가 대식세포를 활성화해야 죽일 수 있음');
+          return true;
+        }
+        this.once('vomoK' + this.getEp(p.ags[0]), 'adaptive', 'Th1 보조 T세포(인터페론-γ)로 활성화된 대식세포가 크립토코쿠스를 소화');
+      }
       if (p.def.beh === 'tb' && c.type === 'macro') {
         if (c.act > 0 && rnd() < 0.85) this.killPath(p, null, false);
         else {
@@ -836,7 +983,7 @@
       this.pyro += (c.type === 'macro' ? 0.01 : 0.004) * IK;
       this.inflam = Math.min(1, this.inflam + (c.type === 'macro' ? 0.004 : 0.0015) * IK);
       if (c.type === 'macro') for (const a of this.foreignAgs(p)) this.stimAg(a, 0.03 * IK, p.def.cat === 'virus' || p.def.beh === 'tb');
-      if (p.def.id === 'staph' && c.type === 'neut' && rnd() < p.def.toxNeutro) {
+      if (p.def.kind === 'staph' && c.type === 'neut' && rnd() < p.def.toxNeutro) {
         c.dead = true;
         this.debris.push({ x: c.x, y: c.y, ag: null, kind: 'pus', t: 0, dead: false });
         this.once('pus' + this.getEp('staph'), 'innate', '포도상구균 독소(류코시딘)가 호중구를 죽임 → 죽은 호중구가 쌓여 고름(농양) 형성');
@@ -847,7 +994,7 @@
     neutTarget(p) {
       if (p.kind) return false;
       const d = p.def;
-      if (d.beh === 'amoeba') return true;
+      if (d.beh === 'amoeba' || p.st === 'hypha') return true;
       if (d.beh === 'tb') return false; // 결핵균은 밀랍 같은 세포벽 때문에 호중구에 잘 죽지 않음
       return this.ease(p) > 0.03 && (d.cat !== 'virus' || p.coat) && d.beh !== 'vaccine';
     }
@@ -867,7 +1014,7 @@
       }
       if (c.loc === 'mig') { this.migrate(c, ds, 110 * SV); return; }
       // 조직
-      let p = c.tgt && !c.tgt.dead && (c.tgt.st === 'free') ? c.tgt : null;
+      let p = c.tgt && !c.tgt.dead && c.tgt.loc === 'tis' && (c.tgt.st === 'free' || c.tgt.st === 'yeast' || c.tgt.st === 'conidia' || c.tgt.st === 'hypha') ? c.tgt : null;
       if (!p) {
         p = this.grid.nearest(c.x, c.y, 400, q => q.loc === 'tis' && this.neutTarget(q));
         if (!p && this.tisList.length) { const q = this.tisList[(rnd() * this.tisList.length) | 0]; if (this.neutTarget(q)) p = q; }
@@ -875,13 +1022,16 @@
       }
       if (p) {
         const d = this.seek(c, p.x, p.y, 70, ds);
-        if (d < (p.def.beh === 'amoeba' ? 14 : 9)) {
+        if (d < (p.def.beh === 'amoeba' || p.st === 'hypha' ? 14 : 9)) {
           if (p.def.beh === 'amoeba') {
             p.hp -= 1.5 * dt;
             if (pr(p.coat ? 0.3 : 1, dt)) {
               c.dead = true; this.pop(c.x, c.y - 8, '호중구 용해됨', '#12a594', 'amn', 3);
               this.debris.push({ x: c.x, y: c.y, ag: null, kind: 'pus', t: 0, dead: false });
             }
+          } else if (p.st === 'hypha') {
+            p.hp -= (p.coat ? 2.5 : 1.5) * (1 + 1.5 * (this.th17 || 0)) * dt;
+            if (rnd() < 0.03) this.spark(p.x, p.y, '#e8e8e8', 3);
           } else this.phago(c, p, dt, 80);
         }
       } else this.wanderTis(c, 18, ds);
@@ -950,13 +1100,15 @@
         if (g && g.gran) { if (dist2(g, c) > 26 * 26) this.seek(c, g.x, g.y, 22, ds); }
       }
       if (c.busy > 0) { c.busy -= dt; this.wanderTis(c, 5, ds); return; }
-      let p = this.grid.nearest(c.x, c.y, 160, q => (q.kind ? true : q.loc === 'tis' && (this.ease(q) > 0 || q.def.beh === 'amoeba')));
+      let p = this.grid.nearest(c.x, c.y, 160, q => (q.kind ? true : q.loc === 'tis' && (this.ease(q) > 0 || q.def.beh === 'amoeba' || q.st === 'hypha')));
       if (p) {
         const d = this.seek(c, p.x, p.y, 24, ds);
-        if (d < (p.def && p.def.beh === 'amoeba' ? 16 : 12)) {
+        if (d < (p.def && (p.def.beh === 'amoeba' || p.st === 'hypha') ? 16 : 12)) {
           if (p.def && p.def.beh === 'amoeba') {
             p.hp -= (c.act > 0 || p.coat ? 2 : 0.6) * dt;
             if (pr(0.4, dt)) { c.dead = true; this.pop(c.x, c.y - 8, '대식세포 용해됨', '#12a594', 'amm', 3); }
+          } else if (p.st === 'hypha') {
+            p.hp -= (c.act > 0 || p.coat ? 0.8 : 0.25) * dt;
           } else if (this.phago(c, p, dt, p.kind ? 30 : 40)) c.busy = 0.03;
         }
       } else {
@@ -982,7 +1134,7 @@
         const d = this.seek(c, p.x, p.y, 26, ds);
         if (d < 11 && pr(25, dt)) {
           if (p.kind) { c.cargo = p.ag; p.dead = true; }
-          else { c.cargo = this.foreignAgs(p)[0]; if (p.def.beh !== 'tb') this.killPath(p, null, false); else p.dead = true; }
+          else { c.cargo = this.foreignAgs(p)[0]; if (p.st === 'hypha') { /* 조각만 떼어 감 */ } else if (p.def.beh !== 'tb') this.killPath(p, null, false); else p.dead = true; }
           c.loc = 'tolN';
           // 가까운 림프관으로 들어가 림프를 따라 림프절 T세포 영역으로
           const tz = IMM.LN.tZone;
@@ -1207,12 +1359,13 @@
       // 기회 감염
       if (this.oppOn && this.day >= this.nextOpp) {
         this.nextOpp = this.day + rr(4, 8);
-        const opts = ['tb', 'pneumo', 'herpes', 'salm'];
+        const opts = ['tb', 'pneumo', 'herpes', 'salm', 'candida', 'crypto'];
         const id = opts[(rnd() * opts.length) | 0];
         const def = IMM.DEF[id];
         const n = Math.round(def.n * 0.6 * K);
         const cx = rr(200, TX1 - 200);
         for (let i = 0; i < n; i++) { const p = this.newPath(def, [def.ag], cx + rr(-250, 250), rr(Z.tisTop + 10, Z.tisTop + 120)); this.initBeh(p); this.paths.push(p); }
+        if (id === 'candida') this.once('oppCand', 'danger', 'Th17 보조 T세포가 사라져 칸디다를 억제하지 못함 → 아구창·식도 칸디다증');
         this.addLog('danger', `기회 감염: 평소라면 쉽게 막았을 ${def.name}이(가) 약해진 면역을 틈타 증식`);
       }
       // 조직 손상·병원체 패턴(PAMP) 인식 → 염증
@@ -1242,7 +1395,9 @@
       const sepsis = this.paths.some(p => p.loc === 'blood' && p.def.cat === 'bact');
       // 새 혈구는 골수에서 혈액으로 나온다
       const M = IMM.MARROW, mx = () => rr(M.x - M.rx * 0.8, M.x + M.rx * 0.8);
-      const nT = (22 + 110 * this.inflam + (sepsis ? 30 : 0)) * K;
+      const t17 = this.th17 = this.th17Level();
+      if (t17 > 0.3) this.once('th17' + Math.floor(this.day / 15), 'adaptive', 'Th17 보조 T세포가 IL-17 분비 → 골수에서 호중구를 대량 동원, 상피는 항균 펩타이드(디펜신) 분비');
+      const nT = (22 + 110 * this.inflam + (sepsis ? 30 : 0) + 40 * t17) * K;
       if (cnt.neut < nT) for (let i = 0; i < K; i++) if (pr(90, dt)) this.addCell('neut', mx(), BY(), 'blood');
       const mT = (10 + 22 * this.inflam) * K;
       if (cnt.macro < mT) for (let i = 0; i < K; i++) if (pr(8, dt)) this.addCell('macro', mx(), BY(), 'blood');
@@ -1271,16 +1426,16 @@
     // ───────── 건강 ─────────
     updateHealth(dt) {
       const s = this.stats;
-      let v = 0, b = 0, pr_ = 0, rb = 0;
+      let v = 0, b = 0, pr_ = 0, rb = 0, fg = 0;
       for (const p of this.paths) {
         if (p.dead || p.st === 'blocked') continue;
         const c = p.def.cat;
-        if (c === 'virus') v++; else if (c === 'bact') b++; else if (c === 'protist') pr_++; else if (c === 'rbc') rb++;
+        if (c === 'virus') v++; else if (c === 'bact') b++; else if (c === 'protist') pr_++; else if (c === 'rbc') rb++; else if (c === 'fungus') fg++;
       }
-      s.virus = v; s.bact = b; s.protist = pr_; s.donor = rb;
+      s.virus = v; s.bact = b; s.protist = pr_; s.donor = rb; s.fungus = fg;
       s.tbIntra = this.cells.reduce((a, c) => a + (c.intra || 0), 0);
       // 병원체가 많아질수록 조직 손상이 가속 (독소 누적·장기 기능 저하)
-      const loadMul = 1 + (v + b + pr_ * 3 + (s.infected || 0) * 2) / (50 * K);
+      const loadMul = 1 + (v + b + fg + pr_ * 3 + (s.infected || 0) * 2) / (50 * K);
       let d = this.dmg * loadMul + s.tbIntra * 0.004 * IK;
       // 중증 바이러스 폐렴: 감염 세포가 너무 많으면 호흡 기능 저하
       const sev = this.infList.filter(c => c.def && c.def.severe).length;
@@ -1295,7 +1450,7 @@
       this.dmgBy.inflam += infl * dt; this.dmgBy.fever += fev * dt; this.dmgBy.anemia += an * dt;
       d += infl + fev + an;
       this.health -= d * dt;
-      const load = v + b + pr_ * 3 + (s.infected || 0) + this.thInf.length;
+      const load = v + b + fg + pr_ * 3 + (s.infected || 0) + this.thInf.length;
       if (load < 3 * K && this.inflam < 0.4) this.health += 1.5 * dt;
       this.health = Math.min(100, this.health);
       for (const k in this.dmgBy) this.dmgBy[k] -= this.dmgBy[k] * 0.15 * dt;
