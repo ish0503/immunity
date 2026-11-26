@@ -51,8 +51,8 @@
     <aside class="palette" id="paletteDock" aria-label="항원 목록">
       <div class="palette-head">
         <h2>항원 상자</h2>
-        <p>카드를 끌어 원하는 침입 경로(피부·상처·점막·위·혈관)에 놓으세요. 카드를 누른 뒤 화면을 눌러도 됩니다.</p>
-        <p class="touch-hint">카드를 누르고 화면을 톡 → 투입 · 두 손가락으로 확대·이동</p>
+        <p>카드를 끌어 지도 위쪽 침입 경로(피부·상처·기관지·위·혈관)에 놓으세요. 카드를 누른 뒤 지도를 눌러도 됩니다.</p>
+        <p class="touch-hint">카드를 누르고 지도를 톡 → 투입 · 끌어서 이동 · 두 손가락으로 확대</p>
       </div>
       <div id="paletteList"></div>
     </aside>
@@ -64,9 +64,11 @@
         <span id="mini" class="mini"></span>
         <span id="hint" class="hint"></span>
       </div>
+      <div class="regions" id="regions" role="group" aria-label="지도 바로가기"><span class="regions-lb">바로가기</span></div>
       <div class="canvas-wrap" id="canvasWrap">
         <canvas id="world" width="1200" height="780" aria-label="몸속 면역 시뮬레이션 화면"></canvas>
         <div id="tooltip" class="tooltip" hidden></div>
+        <canvas id="minimap" class="minimap" aria-label="몸 전체 미니맵 (눌러서 이동)"></canvas>
         <div class="zoom" role="group" aria-label="확대·축소">
           <button type="button" id="zIn" aria-label="확대">＋</button>
           <button type="button" id="zOut" aria-label="축소">－</button>
@@ -113,7 +115,16 @@
 
       <details class="card" open data-k="chart">
         <summary><h2>항체 농도 <small>(1차 vs 2차 면역 반응)</small></h2></summary>
-        <canvas id="chart" width="560" height="260" aria-label="항원별 항체 농도 그래프"></canvas>
+        <div class="chart-bar">
+          <span class="muted" id="chartRange">0–60일</span>
+          <div class="seg small" role="group" aria-label="그래프 범위">
+            <button type="button" id="cFirst">⏮ 처음</button>
+            <button type="button" id="cAll">전체</button>
+            <button type="button" id="cLive" class="on">최신 ⏭</button>
+          </div>
+        </div>
+        <canvas id="chart" width="560" height="260" aria-label="항원별 항체 농도 그래프 (끌어서 지난 기록 보기)"></canvas>
+        <p class="chart-hint">그래프를 좌우로 끌면 지난 기록을 볼 수 있어요. 휠·두 손가락으로 기간을 넓히거나 좁힙니다.</p>
         <div id="chartLegend" class="chart-legend"></div>
       </details>
 
@@ -142,6 +153,7 @@
         <li><b>기억과 2차 반응</b> — 반응이 끝나면 기억 B·T세포가 남습니다. 같은 항원을 다시 넣으면 오른쪽 그래프처럼 훨씬 빠르고 강한 반응이 일어납니다.</li>
       </ol>
       <p>해볼 만한 실험: 같은 병원체 두 번 넣기 · 백신을 먼저 맞고 감염시키기 · O형 몸에 A형 적혈구 수혈 · Rh− 몸에 Rh+ 적혈구 두 번 수혈 · 인플루엔자 변이 · HIV로 보조 T세포가 무너지는 과정 · ‘압도적’ 투입량으로 면역 붕괴시키기.</p>
+      <p><b>몸 지도 보기</b> — 지도를 끌어서 옮기고, 휠이나 두 손가락으로 확대합니다. 위의 <b>바로가기</b>나 왼쪽 위 <b>미니맵</b>을 누르면 그 구역으로 날아갑니다. 위에서부터 피부·점막 → 조직 → 큰 혈관 → 림프절·비장·간 순서로 놓인 몸의 단면입니다.</p>
       <p class="muted">화면 속 세포나 병원체 위에 마우스를 올리면 설명이 나옵니다. 실제 면역 체계를 단순화한 교육용 모델이며, 시간은 1배속에서 1초 ≈ 0.4일입니다.</p>
       <div class="dialog-actions"><button class="btn primary" value="ok">시작하기</button></div>
     </form>
