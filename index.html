@@ -41,6 +41,7 @@
           <option>AB+</option><option>AB−</option><option selected>O+</option><option>O−</option>
         </select>
       </label>
+      <button id="btnLab" class="btn" type="button">🧬 돌연변이 실험실</button>
       <button id="btnReset" class="btn" type="button">새 몸으로 시작</button>
       <button id="btnLabels" class="btn ghost" type="button" aria-pressed="true">라벨 끄기</button>
       <button id="btnHelp" class="btn ghost" type="button">도움말</button>
@@ -105,6 +106,7 @@
           <div><span>바이러스</span><b id="cVirus">0</b></div>
           <div><span>세균</span><b id="cBact">0</b></div>
           <div><span>원생생물</span><b id="cProt">0</b></div>
+          <div><span>곰팡이</span><b id="cFung">0</b></div>
           <div><span>감염 세포</span><b id="cInf">0</b></div>
           <div><span>호중구</span><b id="cNeut">0</b></div>
           <div><span>대식세포</span><b id="cMacro">0</b></div>
@@ -145,23 +147,47 @@
   <dialog id="help">
     <form method="dialog">
       <h2>면역 실험실 사용법</h2>
-      <p>왼쪽 <b>항원 상자</b>에서 적혈구·바이러스·세균·원생생물·백신 카드를 끌어 화면 위쪽의 <b>침입 경로</b>에 놓으면, 몸이 단계별로 반응합니다.</p>
+      <p>왼쪽 <b>항원 상자</b>에서 적혈구·바이러스·세균·원생생물·곰팡이·백신 카드를 끌어 화면 위쪽의 <b>침입 경로</b>에 놓으면, 몸이 단계별로 반응합니다.</p>
       <ol>
         <li><b>1차 방어 (외부 장벽)</b> — 피부 각질층, 점액과 섬모, 위산, 라이소자임이 대부분을 막습니다. 상처나 혈관으로 넣으면 장벽을 건너뜁니다.</li>
         <li><b>2차 방어 (선천 면역)</b> — 비만세포의 히스타민으로 염증이 생기고 호중구·대식세포가 몰려와 탐식합니다. 보체가 세균에 구멍을 뚫고, 감염 세포는 인터페론을 내며, NK세포가 이상한 세포를 제거합니다. 발열도 일어납니다.</li>
         <li><b>3차 방어 (특이적 면역)</b> — 수지상세포가 항원을 림프절로 가져가 MHC II로 보조 T세포에 제시합니다. 보조 T세포의 도움으로 B세포가 형질세포가 되어 항체를 만들고, 세포독성 T세포는 MHC I로 감염 세포를 찾아 죽입니다.</li>
         <li><b>기억과 2차 반응</b> — 반응이 끝나면 기억 B·T세포가 남습니다. 같은 항원을 다시 넣으면 오른쪽 그래프처럼 훨씬 빠르고 강한 반응이 일어납니다.</li>
       </ol>
-      <p>해볼 만한 실험: 같은 병원체 두 번 넣기 · 백신을 먼저 맞고 감염시키기 · O형 몸에 A형 적혈구 수혈 · Rh− 몸에 Rh+ 적혈구 두 번 수혈 · 인플루엔자 변이 · HIV로 보조 T세포가 무너지는 과정 · ‘압도적’ 투입량으로 면역 붕괴시키기.</p>
+      <p><b>🧬 돌연변이 실험실</b> — 바이러스·세균·곰팡이의 표면 단백질 유전자 염기를 바꿔 변이주를 만듭니다. 아미노산이 많이 바뀔수록 기억 세포와 항체가 덜 알아봐서, 2차 반응이 약해지거나(교차 반응) 처음 보는 것처럼 다시 싸워야 합니다(면역 회피).</p>
+      <p>해볼 만한 실험: 같은 병원체 두 번 넣기 · 감기를 앓고 나서 아미노산 1개·3개 바뀐 변이주 넣어 비교하기 · AIDS 단계에서 칸디다·크립토코쿠스 기회 감염 보기 · 백신을 먼저 맞고 감염시키기 · O형 몸에 A형 적혈구 수혈 · Rh− 몸에 Rh+ 적혈구 두 번 수혈 · 인플루엔자 변이 · HIV로 보조 T세포가 무너지는 과정 · ‘압도적’ 투입량으로 면역 붕괴시키기.</p>
       <p><b>몸 지도 보기</b> — 지도를 끌어서 옮기고, 휠이나 두 손가락으로 확대합니다. 위의 <b>바로가기</b>나 왼쪽 위 <b>미니맵</b>을 누르면 그 구역으로 날아갑니다. 위에서부터 피부·점막 → 조직 → 큰 혈관 → 림프절·비장·간 순서로 놓인 몸의 단면입니다.</p>
       <p class="muted">화면 속 세포나 병원체 위에 마우스를 올리면 설명이 나옵니다. 실제 면역 체계를 단순화한 교육용 모델이며, 시간은 1배속에서 1초 ≈ 0.4일입니다.</p>
       <div class="dialog-actions"><button class="btn primary" value="ok">시작하기</button></div>
     </form>
   </dialog>
 
+  <dialog id="lab" aria-labelledby="labTitle">
+    <div class="lab">
+      <div class="lab-head">
+        <h2 id="labTitle">🧬 돌연변이 실험실</h2>
+        <form method="dialog"><button class="btn ghost" value="close" aria-label="닫기">✕</button></form>
+      </div>
+      <p class="muted">병원체 표면 단백질 유전자의 염기를 직접 바꿔 변이주를 만들어 보세요. 항체와 기억 B세포는 이 부분(<b>항원 결정부위</b>)의 아미노산 모양을 보고 병원체를 알아봅니다. 염기 3개(코돈)가 아미노산 1개를 정해요.</p>
+      <div id="labPick" class="lab-pick" role="group" aria-label="병원체 고르기"></div>
+      <div class="lab-gene"><b id="labGene"></b><span id="labNuc" class="muted"></span></div>
+      <div id="labSeq" class="lab-seq"></div>
+      <div class="lab-tools">
+        <button id="labRandom" class="btn" type="button">🎲 무작위 점 돌연변이</button>
+        <button id="labResetSeq" class="btn ghost" type="button">원래대로</button>
+      </div>
+      <div id="labSum" class="lab-sum" aria-live="polite"></div>
+      <div class="dialog-actions lab-actions">
+        <button id="labClear" class="btn ghost" type="button" hidden>만든 변이주 모두 지우기</button>
+        <button id="labMake" class="btn primary" type="button">변이주 만들기 → 항원 상자에 추가</button>
+      </div>
+    </div>
+  </dialog>
+
   <script src="js/data.js"></script>
   <script src="js/sim.js"></script>
   <script src="js/render.js"></script>
+  <script src="js/lab.js"></script>
   <script src="js/ui.js"></script>
 </body>
 </html>

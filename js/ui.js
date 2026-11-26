@@ -90,19 +90,26 @@
   window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { fitCanvas(); drawChart(); }, 80); });
 
   // ───────── 팔레트 ─────────
-  function buildPalette() {
+  function buildPalette(selId) {
     const list = $('paletteList');
+    list.innerHTML = '';
     for (const cat of IMM.CATS) {
       const sec = document.createElement('div'); sec.className = 'cat';
       sec.innerHTML = `<h3>${cat.name}</h3>`;
+      if (cat.id === 'mutant') {
+        const lb = document.createElement('button'); lb.type = 'button'; lb.className = 'btn lab-open';
+        lb.textContent = '🧬 돌연변이 실험실 열기'; lb.addEventListener('click', () => IMM.openLab());
+        sec.appendChild(lb);
+      }
       const grid = document.createElement('div'); grid.className = 'agents';
-      for (const d of IMM.DEFS.filter(x => x.cat === cat.id)) {
+      for (const d of IMM.DEFS.filter(x => (x.pal || x.cat) === cat.id)) {
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'agent'; b.dataset.id = d.id; b.title = d.desc;
         const cv = document.createElement('canvas'); cv.width = 68; cv.height = 68;
         const ic = cv.getContext('2d'); ic.scale(2, 2); IMM.drawIcon(ic, d, 34);
         const txt = document.createElement('div');
-        txt.innerHTML = `<div class="nm">${d.name}</div><div class="rt">주 경로: ${IMM.ROUTE_NAMES[d.route]}</div>`;
+        const nd = d.mutant ? IMM.aaDiff(d.aa, IMM.GENES[d.mutKey].aa) : 0;
+        txt.innerHTML = `<div class="nm">${d.name}</div><div class="rt">${d.mutant ? (nd ? `아미노산 ${nd}개 다름 · ` : '침묵 돌연변이 · ') : '주 경로: '}${IMM.ROUTE_NAMES[d.route]}</div>`;
         b.append(cv, txt);
         b.addEventListener('pointerdown', (e) => startDrag(e, d, b));
         b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(d, b); } });
@@ -110,6 +117,10 @@
       }
       sec.appendChild(grid); list.appendChild(sec);
     }
+    if (selected && !IMM.DEF[selected.id]) { selected = null; setHint(''); }
+    const el = selId && list.querySelector(`.agent[data-id="${selId}"]`);
+    if (el) { selected = null; select(IMM.DEF[selId], el); el.scrollIntoView({ block: 'nearest' }); }
+    else if (selected) { const e2 = list.querySelector(`.agent[data-id="${selected.id}"]`); if (e2) e2.classList.add('sel'); }
   }
 
   function select(d, el) {
@@ -329,6 +340,9 @@
       const d = q.def;
       let s = d.desc;
       if (q.st === 'liver') s = '간세포 안에 숨어 증식 중인 말라리아 원충 (간 단계).';
+      if (q.st === 'hypha') s = '곰팡이 균사: 끝에서 자라며 가지를 침. 너무 길어 탐식할 수 없어 호중구가 둘러싸 활성산소·NET으로 죽임. 빨간 막대 = 남은 체력.';
+      if (q.st === 'conidia') s = '아스페르길루스 분생자(포자). 대식세포가 쉽게 먹지만, 하루 안에 못 먹으면 발아해 균사가 됨.';
+      if (q.st === 'yeast') s = q.def.capsule ? '크립토코쿠스 효모: 두꺼운 협막(보라 테두리)으로 탐식을 피하고, 먹혀도 빠져나옴. Th1이 대식세포를 활성화해야 죽음.' : '칸디다 효모: 출아로 늘어나고 체온에서 균사로 바뀜. Th17 보조 T세포가 호중구를 불러 막음.';
       if (q.st === 'mero') s = '적혈구를 노리는 말라리아 분열소체(메로조이트). 혈액에 나와 있는 짧은 순간에만 항체가 닿음.';
       const st = [];
       if (q.coat) st.push(d.cat === 'rbc' ? '항체가 결합해 응집됨' : d.cat === 'virus' ? '항체로 중화됨' : '항체가 붙음(옵소닌화)');
@@ -392,6 +406,8 @@
     labels = !labels; $('btnLabels').textContent = labels ? '라벨 끄기' : '라벨 켜기'; $('btnLabels').setAttribute('aria-pressed', String(labels));
   });
   $('btnHelp').addEventListener('click', () => $('help').showModal());
+  IMM.initLab({ getSim: () => sim, rebuildPalette: buildPalette, hint: setHint });
+  $('btnLab').addEventListener('click', () => IMM.openLab());
   document.addEventListener('keydown', (e) => {
     if (e.target.matches('input, select, textarea')) return;
     if (e.code === 'Space' && !e.target.matches('button')) { e.preventDefault(); $('btnPlay').click(); }
@@ -417,7 +433,7 @@
   function updatePanel() {
     const s = sim.stats;
     $('dayLabel').textContent = sim.day.toFixed(1) + '일째';
-    $('mini').textContent = `건강 ${Math.round(Math.max(0, sim.health))} · ${sim.temp.toFixed(1)}℃` + (sim.hivEver ? ` · CD4 ${s.cd4}` : '') + ((s.virus || s.bact || s.protist) ? ` · 병원체 ${(s.virus || 0) + (s.bact || 0) + (s.protist || 0)}` : '');
+    $('mini').textContent = `건강 ${Math.round(Math.max(0, sim.health))} · ${sim.temp.toFixed(1)}℃` + (sim.hivEver ? ` · CD4 ${s.cd4}` : '') + ((s.virus || s.bact || s.protist || s.fungus) ? ` · 병원체 ${(s.virus || 0) + (s.bact || 0) + (s.protist || 0) + (s.fungus || 0)}` : '');
     const h = Math.max(0, sim.health);
     $('vHealth').textContent = Math.round(h);
     const bh = $('bHealth'); bh.style.width = h + '%';
@@ -432,6 +448,7 @@
     const rbc = Math.round((s.rbc == null ? IMM.RBC_N : s.rbc) / IMM.RBC_N * 100);
     const vr = $('vRbc'); vr.textContent = rbc + '%'; vr.style.color = rbc < 70 ? 'var(--bad)' : '';
     $('cVirus').textContent = s.virus || 0; $('cBact').textContent = (s.bact || 0) + (s.tbIntra ? ` (+세포 안 ${Math.round(s.tbIntra)})` : '');
+    $('cFung').textContent = s.fungus || 0;
     $('cProt').textContent = (s.protist || 0) + (s.rbcInf ? ` (+적혈구 속 ${s.rbcInf})` : '');
     $('cInf').textContent = s.infected || 0; $('cNeut').textContent = s.neut || 0; $('cMacro').textContent = s.macro || 0;
     $('cNk').textContent = s.nk || 0; $('cCtl').textContent = s.ctl || 0;
@@ -439,7 +456,7 @@
     // 상태
     const st = $('statusLabel');
     let txt = '정상', cls = 'ok';
-    const load = (s.virus || 0) + (s.bact || 0) + (s.protist || 0) + (s.infected || 0) + (s.rbcInf || 0) + (s.donor && sim.paths.some(p => p.coat) ? 1 : 0);
+    const load = (s.virus || 0) + (s.bact || 0) + (s.protist || 0) + (s.fungus || 0) + (s.infected || 0) + (s.rbcInf || 0) + (s.donor && sim.paths.some(p => p.coat) ? 1 : 0);
     if (!sim.alive) { txt = '사망 — 면역 체계 붕괴'; cls = 'bad'; }
     else if (sim.flags.hiv1 && cd4 < 200) { txt = '면역 결핍 (AIDS)'; cls = 'bad'; }
     else if (h < 30) { txt = '위독'; cls = 'bad'; }

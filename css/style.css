@@ -289,3 +289,49 @@ body.big.no-palette .palette { display: none; }
   body.big .regions { display: none; }
   body.big .minimap { width: 110px; height: 55px; }
 }
+
+/* ───────── 돌연변이 실험실 ───────── */
+dialog#lab { max-width: 760px; max-height: calc(100dvh - 24px); overflow: auto; padding: 18px; }
+.lab-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lab-head form { margin: 0; }
+.lab p { font-size: 13.5px; line-height: 1.55; margin: 6px 0; }
+.lab-pick { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.lab-chip { font: inherit; font-size: 13px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); border-radius: 999px; padding: 5px 12px; cursor: pointer; min-height: 32px; }
+.lab-chip.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+.lab-gene { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-size: 13.5px; margin: 4px 0 8px; }
+.lab-gene .muted { font-size: 12px; }
+.lab-seq { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+.codon { border: 1px solid var(--line); border-radius: 10px; padding: 6px 4px; background: var(--surface-2); text-align: center; min-width: 0; }
+.codon.syn { border-color: #8a94ad; }
+.codon.mis { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--surface-2)); }
+.codon.non { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, var(--surface-2)); }
+.nts { display: flex; justify-content: center; gap: 2px; }
+.nt { font: 700 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace; width: 24px; height: 30px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; color: #fff; padding: 0; }
+.nt-A { background: #2f9e57; } .nt-T { background: #d64545; } .nt-G { background: #c88a12; } .nt-C { background: #3b6fd8; }
+.nt.chg { outline: 2px solid var(--text); outline-offset: 1px; }
+.nt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.codon .aa { font-size: 12px; margin-top: 5px; line-height: 1.25; }
+.codon .aa b { display: block; font-size: 13px; }
+.codon .aa s { color: var(--muted); }
+.codon .aa small { display: block; color: var(--muted); font-size: 10.5px; }
+.codon .tag { font-size: 10.5px; min-height: 14px; margin-top: 2px; color: var(--muted); }
+.codon.mis .tag { color: var(--warn); font-weight: 600; }
+.codon.non .tag { color: var(--bad); font-weight: 700; }
+.lab-tools { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; }
+.lab-sum { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 6px; }
+.lab-sum .bad { color: var(--bad); }
+.lab-meter { margin: 6px 0; font-size: 13px; }
+.mrow { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 2fr) 42px; gap: 8px; align-items: center; margin: 5px 0; }
+.mrow span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mrow i { display: block; height: 10px; background: var(--surface-2); border-radius: 5px; overflow: hidden; border: 1px solid var(--line); }
+.mrow i b { display: block; height: 100%; }
+.mrow b.ok { background: var(--ok); } .mrow b.warn { background: var(--warn); } .mrow b.bad { background: var(--bad); }
+.mrow em { font-style: normal; text-align: right; font-weight: 600; }
+.lab-actions { gap: 8px; flex-wrap: wrap; }
+.lab-actions .btn:disabled { opacity: .5; cursor: not-allowed; }
+.lab-open { width: 100%; margin: 2px 0 8px; }
+@media (max-width: 640px) {
+  .lab-seq { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .nt { width: 26px; height: 32px; }
+  dialog#lab { padding: 14px; }
+}
