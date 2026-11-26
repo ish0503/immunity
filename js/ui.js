@@ -11,54 +11,80 @@
   let drag = null;     // 끌고 있는 항원
   let hoverPos = null;
   let logShown = 0;
-  const view = { s: 1, ox: 0, oy: 0 }; // 확대 배율과 화면 왼쪽 위의 세계 좌표
+  // 지도 보기: k = 화면 CSS 픽셀 / 세계 좌표, (ox, oy) = 화면 왼쪽 위의 세계 좌표
+  const view = { k: 0.6, ox: 0, oy: 0, cw: 300, ch: 200, dpr: 1 };
+  let kMin = 0.1, viewInit = false, fly = null;
+  const K_MAX = 3;
   let big = false, paletteOn = true;
-  let baseK = 1; // 캔버스 픽셀 / 세계 좌표
+  // 느린 기기에서는 해상도를 낮추고 단순한 모양으로 그림
+  let lowQ = false, slowT = 0, fastT = 0, ema = 1 / 60;
 
   function parseBlood(v) { return { bloodType: v.replace(/[+−-]/g, ''), rh: v.includes('+') }; }
 
-  // ───────── 고해상도 캔버스 ─────────
+  // ───────── 캔버스 크기와 지도 보기 ─────────
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   function fitCanvas() {
-    const dpr = Math.min(2.5, window.devicePixelRatio || 1);
+    const dpr = lowQ ? 1 : Math.min(2, window.devicePixelRatio || 1);
     const wrap = $('canvasWrap');
-    let cssW;
+    const cw = Math.max(200, Math.floor(wrap.parentElement.clientWidth));
+    let ch;
     if (big) {
       const r = wrap.getBoundingClientRect();
-      // 항원 상자가 아래 띠면 그만큼 높이를 빼고, 옆 띠(낮은 가로 화면)면 레이아웃 여백이 이미 처리함
+      // 항원 상자가 아래 띠면 그만큼 높이를 뺌 (옆 띠면 레이아웃 여백이 이미 처리)
       const dock = $('paletteDock'), bottomDock = paletteOn && dock.getBoundingClientRect().top > window.innerHeight / 2;
-      const avW = wrap.parentElement.clientWidth, avH = Math.max(120, window.innerHeight - r.top - (bottomDock ? dock.offsetHeight : 0) - 6);
-      cssW = Math.min(avW, avH * IMM.W / IMM.H);
-      canvas.style.width = cssW + 'px'; canvas.style.height = (cssW * IMM.H / IMM.W) + 'px';
+      ch = Math.max(160, Math.floor(window.innerHeight - r.top - (bottomDock ? dock.offsetHeight : 0) - 6));
     } else {
-      canvas.style.width = ''; canvas.style.height = '';
-      cssW = wrap.clientWidth || IMM.W;
+      ch = Math.round(Math.min(window.innerHeight * 0.8, Math.max(cw * 0.6, Math.min(480, window.innerHeight * 0.62))));
     }
-    // 확대해도 선명하도록 화면 크기 × 확대율에 맞춘 해상도 (최대 2400px)
-    const px = Math.min(2400, Math.max(IMM.W, Math.round(cssW * dpr * Math.min(view.s, 2))));
-    canvas.width = px; canvas.height = Math.round(px * IMM.H / IMM.W);
-    baseK = canvas.width / IMM.W;
-    applyView();
-    const cw = chart.clientWidth || 300;
-    chart.width = cw * dpr; chart.height = Math.round(cw * 0.46) * dpr;
+    // 크기가 바뀌어도 보던 곳의 가운데를 유지
+    const cx = view.ox + view.cw / view.k / 2, cy = view.oy + view.ch / view.k / 2;
+    canvas.style.width = cw + 'px'; canvas.style.height = ch + 'px';
+    canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
+    view.cw = cw; view.ch = ch; view.dpr = dpr;
+    kMin = Math.min(cw / IMM.W, ch / IMM.H);
+    if (!viewInit) {
+      viewInit = true;
+      view.k = clamp(Math.max(cw / 1100, 0.55), kMin, 1.2);
+      view.ox = 0; view.oy = 0;
+    } else { view.ox = cx - cw / view.k / 2; view.oy = cy - ch / view.k / 2; }
+    clampView();
+    const cwc = chart.clientWidth || 300;
+    chart.width = cwc * dpr; chart.height = Math.round(cwc * 0.5) * dpr;
     cctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-  function applyView() {
-    const k = baseK * view.s;
-    ctx.setTransform(k, 0, 0, k, -view.ox * k, -view.oy * k);
+    drawMini(true);
   }
   function clampView() {
-    view.s = Math.max(1, Math.min(4, view.s));
-    view.ox = Math.max(0, Math.min(IMM.W - IMM.W / view.s, view.ox));
-    view.oy = Math.max(0, Math.min(IMM.H - IMM.H / view.s, view.oy));
+    view.k = clamp(view.k, kMin, K_MAX);
+    const vw = view.cw / view.k, vh = view.ch / view.k;
+    view.ox = vw >= IMM.W ? (IMM.W - vw) / 2 : clamp(view.ox, 0, IMM.W - vw);
+    view.oy = vh >= IMM.H ? (IMM.H - vh) / 2 : clamp(view.oy, 0, IMM.H - vh);
+    $('zFit').disabled = view.k <= kMin * 1.01;
+    $('zIn').disabled = view.k >= K_MAX * 0.99;
   }
+  function viewRect() { return { x0: view.ox, y0: view.oy, x1: view.ox + view.cw / view.k, y1: view.oy + view.ch / view.k, k: view.k, dpr: view.dpr }; }
   // 화면 위 한 점(세계 좌표 wx, wy)을 고정한 채 배율 변경
-  function zoomAt(wx, wy, ns) {
-    const old = view.s; ns = Math.max(1, Math.min(4, ns));
-    view.ox = wx - (wx - view.ox) * old / ns;
-    view.oy = wy - (wy - view.oy) * old / ns;
-    view.s = ns; clampView();
-    if (Math.abs(ns - old) > 0.3 || ns === 1) fitCanvas(); else applyView();
-    $('zFit').disabled = view.s === 1;
+  function zoomAt(wx, wy, nk) {
+    fly = null;
+    const sx = (wx - view.ox) * view.k, sy = (wy - view.oy) * view.k;
+    view.k = clamp(nk, kMin, K_MAX);
+    view.ox = wx - sx / view.k; view.oy = wy - sy / view.k;
+    clampView();
+  }
+  // 한 구역이 화면에 꽉 차도록 부드럽게 이동
+  function flyTo(r) {
+    const k = clamp(Math.min(view.cw / (r.x1 - r.x0), view.ch / (r.y1 - r.y0)), kMin, K_MAX);
+    const cx = (r.x0 + r.x1) / 2, cy = (r.y0 + r.y1) / 2;
+    fly = { t: 0, from: { k: view.k, cx: view.ox + view.cw / view.k / 2, cy: view.oy + view.ch / view.k / 2 }, to: { k, cx, cy } };
+  }
+  function stepFly(dt) {
+    if (!fly) return;
+    fly.t = Math.min(1, fly.t + dt / 0.45);
+    const e = 1 - Math.pow(1 - fly.t, 3), f = fly.from, g = fly.to;
+    view.k = f.k * Math.pow(g.k / f.k, e);
+    const cx = f.cx + (g.cx - f.cx) * e, cy = f.cy + (g.cy - f.cy) * e;
+    view.ox = cx - view.cw / view.k / 2; view.oy = cy - view.ch / view.k / 2;
+    clampView();
+    if (fly.t >= 1) fly = null;
   }
   let resizeT = 0;
   window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(() => { fitCanvas(); drawChart(); }, 80); });
@@ -129,7 +155,7 @@
   function toWorld(cx, cy) {
     const r = canvas.getBoundingClientRect();
     if (cx < r.left || cx > r.right || cy < r.top || cy > r.bottom) return null;
-    return { x: view.ox + (cx - r.left) / r.width * IMM.W / view.s, y: view.oy + (cy - r.top) / r.height * IMM.H / view.s };
+    return { x: view.ox + (cx - r.left) / view.k, y: view.oy + (cy - r.top) / view.k };
   }
 
   function routeText(d, p) {
@@ -145,17 +171,18 @@
     if (!running) setHint('일시정지 중입니다. ▶ 재생을 누르면 반응이 진행됩니다.');
   }
 
-  // 캔버스: 탭(투입·설명), 한 손가락/마우스 끌기(확대 상태에서 이동), 두 손가락 핀치(확대)
+  // 캔버스: 탭(투입·설명), 한 손가락/마우스 끌기(지도 이동), 두 손가락 핀치·휠(확대)
   const ptrs = new Map();
   let gesture = null, tipTimer = 0;
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
     ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (ptrs.size === 1) gesture = { type: 'tap', sx: e.clientX, sy: e.clientY, ox: view.ox, oy: view.oy, t: performance.now() };
+    fly = null;
+    if (ptrs.size === 1) gesture = { type: 'tap', sx: e.clientX, sy: e.clientY, ox: view.ox, oy: view.oy };
     else if (ptrs.size === 2) {
       const [a, b] = [...ptrs.values()];
-      const mid = toWorld((a.x + b.x) / 2, (a.y + b.y) / 2) || { x: IMM.W / 2, y: IMM.H / 2 };
-      gesture = { type: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, s0: view.s, mid };
+      const mid = toWorld((a.x + b.x) / 2, (a.y + b.y) / 2) || { x: view.ox, y: view.oy };
+      gesture = { type: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, k0: view.k, mid };
       $('tooltip').hidden = true;
     }
   });
@@ -163,17 +190,15 @@
     if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (gesture && gesture.type === 'pinch' && ptrs.size >= 2) {
       const [a, b] = [...ptrs.values()];
-      zoomAt(gesture.mid.x, gesture.mid.y, gesture.s0 * Math.hypot(a.x - b.x, a.y - b.y) / gesture.d0);
+      zoomAt(gesture.mid.x, gesture.mid.y, gesture.k0 * Math.hypot(a.x - b.x, a.y - b.y) / gesture.d0);
       return;
     }
     if (gesture && (gesture.type === 'tap' || gesture.type === 'pan') && ptrs.size === 1) {
       const dx = e.clientX - gesture.sx, dy = e.clientY - gesture.sy;
-      if (gesture.type === 'tap' && Math.hypot(dx, dy) > 8 && view.s > 1) gesture.type = 'pan';
+      if (gesture.type === 'tap' && Math.hypot(dx, dy) > 8) { gesture.type = 'pan'; $('tooltip').hidden = true; canvas.classList.add('panning'); }
       if (gesture.type === 'pan') {
-        const r = canvas.getBoundingClientRect();
-        view.ox = gesture.ox - dx / r.width * IMM.W / view.s;
-        view.oy = gesture.oy - dy / r.height * IMM.H / view.s;
-        clampView(); applyView();
+        view.ox = gesture.ox - dx / view.k; view.oy = gesture.oy - dy / view.k;
+        clampView();
         return;
       }
     }
@@ -186,6 +211,7 @@
   const endPtr = (e) => {
     const g = gesture;
     ptrs.delete(e.pointerId);
+    canvas.classList.remove('panning');
     if (ptrs.size === 0) {
       gesture = null;
       if (g && g.type === 'tap' && e.type === 'pointerup' && Math.hypot(e.clientX - g.sx, e.clientY - g.sy) <= 8) {
@@ -205,16 +231,41 @@
   canvas.addEventListener('pointerup', endPtr);
   canvas.addEventListener('pointercancel', endPtr);
   canvas.addEventListener('wheel', (e) => {
-    // 크게 보기에서는 휠만으로, 평소에는 Ctrl(⌘)+휠로 확대 (페이지 스크롤 방해 안 함)
-    if (!big && !e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
     const p = toWorld(e.clientX, e.clientY); if (!p) return;
-    zoomAt(p.x, p.y, view.s * Math.exp(-e.deltaY * 0.0015));
+    zoomAt(p.x, p.y, view.k * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
   }, { passive: false });
-  $('zIn').addEventListener('click', () => zoomAt(view.ox + IMM.W / view.s / 2, view.oy + IMM.H / view.s / 2, view.s * 1.5));
-  $('zOut').addEventListener('click', () => zoomAt(view.ox + IMM.W / view.s / 2, view.oy + IMM.H / view.s / 2, view.s / 1.5));
-  $('zFit').addEventListener('click', () => zoomAt(0, 0, 1));
-  $('zFit').disabled = true;
+  const centerW = () => ({ x: view.ox + view.cw / view.k / 2, y: view.oy + view.ch / view.k / 2 });
+  $('zIn').addEventListener('click', () => { const c = centerW(); zoomAt(c.x, c.y, view.k * 1.5); });
+  $('zOut').addEventListener('click', () => { const c = centerW(); zoomAt(c.x, c.y, view.k / 1.5); });
+  $('zFit').addEventListener('click', () => flyTo({ x0: 0, y0: 0, x1: IMM.W, y1: IMM.H }));
+
+  // 구역 바로가기
+  for (const r of IMM.REGIONS) {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = r.name;
+    b.addEventListener('click', () => flyTo(r));
+    $('regions').appendChild(b);
+  }
+
+  // 미니맵: 몸 전체에서 지금 보는 곳 (누르거나 끌어서 이동)
+  const mini = $('minimap'), mctx = mini.getContext('2d');
+  let miniT = 0;
+  function drawMini(force) {
+    mini.style.visibility = view.k <= kMin * 1.15 ? 'hidden' : ''; // 몸 전체가 보일 땐 필요 없음
+    const w = mini.clientWidth || 160, h = mini.clientHeight || 80, dpr = view.dpr;
+    if (force || mini.width !== Math.round(w * dpr)) { mini.width = Math.round(w * dpr); mini.height = Math.round(h * dpr); }
+    mctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    IMM.drawMini(mctx, w, h, sim, viewRect());
+  }
+  const miniGo = (e) => {
+    const r = mini.getBoundingClientRect();
+    const s = Math.min(r.width / IMM.W, r.height / IMM.H);
+    fly = null;
+    view.ox = (e.clientX - r.left) / s - view.cw / view.k / 2; view.oy = (e.clientY - r.top) / s - view.ch / view.k / 2;
+    clampView(); drawMini();
+  };
+  mini.addEventListener('pointerdown', (e) => { mini.setPointerCapture(e.pointerId); miniGo(e); });
+  mini.addEventListener('pointermove', (e) => { if (e.buttons || e.pointerType !== 'mouse' && mini.hasPointerCapture(e.pointerId)) miniGo(e); });
 
   // ───────── 크게 보기 ─────────
   function setBig(on) {
@@ -262,8 +313,8 @@
     tip.style.left = Math.max(4, x) + 'px'; tip.style.top = Math.max(4, y) + 'px';
   }
   function pick(p) {
-    let best = null, bd = 16 * 16;
-    const near = (o, r) => { const d = (o.x - p.x) ** 2 + (o.y - p.y) ** 2; if (d < (r || 16) ** 2 && d < bd) { bd = d; return true; } return false; };
+    let best = null, bd = Math.max(16, 10 / view.k) ** 2;
+    const near = (o, r) => { r = Math.max(r || 16, 10 / view.k); const d = (o.x - p.x) ** 2 + (o.y - p.y) ** 2; if (d < r * r && d < bd) { bd = d; return true; } return false; };
     for (const c of sim.cells) if (near(c, c.type === 'macro' ? 16 : 12)) {
       const k = c.type === 'macro' && c.loc === 'blood' ? 'mono' : c.type;
       const inf = CELL_INFO[k];
@@ -300,11 +351,17 @@
     if (!best) {
       const L = IMM.LIVER, Gg = IMM.GANGLION, ln = IMM.LN;
       if ((p.x - L.x) ** 2 + (p.y - L.y) ** 2 < L.r * L.r) return ['간', '말라리아 원충이 혈액에 퍼지기 전 며칠 동안 숨어 증식하는 곳.'];
-      if ((p.x - Gg.x) ** 2 + (p.y - Gg.y) ** 2 < 400) return ['감각 신경절', `단순포진 바이러스가 잠복하는 곳 (현재 잠복: ${sim.latentHerpes}).`];
+      const S = IMM.SPLEEN, M = IMM.MARROW, N = IMM.LNODE;
+      const inE = (o, rx, ry) => ((p.x - o.x) / rx) ** 2 + ((p.y - o.y) / ry) ** 2 < 1;
+      if (inE(S, S.rx, S.ry)) return ['비장', '혈액 속 림프절. 적색 속질은 늙은 적혈구와 항체가 붙은 세포·세균을 걸러내고, 백색 속질(파란 점 덩어리)에서는 혈액으로 들어온 항원에 대한 B·T세포 반응이 일어남.'];
+      if (inE(M, M.rx + 30, M.ry + 30)) return ['골수', '뼈 속 조혈 조직. 적혈구·호중구·단핵구·NK세포·혈소판이 날마다 수십억 개씩 만들어져 혈액으로 나감. 감염이 생기면 호중구 생산이 늘어남.'];
+      if (IMM.LYMPH_X.some(x => Math.abs(p.x - x) < 14) && p.y > IMM.Z.tisTop + 100 && p.y < IMM.LN.bZone.y0) return ['림프관', '조직액과 함께 항원·수지상세포를 림프절로 실어 나르는 관. 판막이 있어 한 방향으로만 흐름.'];
+      if ((p.x - Gg.x) ** 2 + (p.y - Gg.y) ** 2 < 900) return ['감각 신경절', `단순포진 바이러스가 잠복하는 곳 (현재 잠복: ${sim.latentHerpes}).`];
       const inZ = (z) => p.x > z.x0 && p.x < z.x1 && p.y > z.y0 - 18 && p.y < z.y1;
       if (inZ(ln.bZone)) return ['B세포 여포', '항원을 알아본 B세포가 보조 T세포의 도움을 받아 증식하고(배중심), 클래스 전환·친화도 성숙을 거쳐 형질세포와 기억 B세포가 됨.'];
       if (inZ(ln.pZone)) return ['형질세포 · 기억세포', '형질세포는 초당 수천 개의 항체를 분비. 별(★)은 오래 남는 기억 B·T세포로, 다음 침입 때 2차 면역 반응을 일으킴.'];
       if (inZ(ln.tZone)) return ['T세포 영역', '수지상세포가 가져온 항원을 보조 T세포·세포독성 T세포가 확인하는 곳. 빨간 점 = 세포독성 T세포(CD8).'];
+      if (inE(N, N.rx, N.ry)) return ['림프절', '림프관이 모이는 작은 콩 모양 기관. 피막 아래 굴(sinus)로 들어온 항원을 B세포 여포·T세포 영역에서 걸러 적응 면역을 시작함.'];
       if (p.y < IMM.Z.tisTop) { const g = IMM.GATES.find(q => p.x >= q.x0 && p.x < q.x1); if (g) return [g.name + ' (1차 방어)', {
         skin: '죽은 각질세포가 겹겹이 쌓인 물리적 장벽. 피지와 땀의 산성·라이소자임이 세균을 억제. 대부분의 병원체가 통과하지 못함.',
         wound: '피부가 찢어져 장벽이 없는 곳. 병원체가 바로 조직으로 들어오고 혈소판·비만세포가 염증을 시작.',
@@ -325,6 +382,7 @@
   function reset() {
     sim = new IMM.Sim(parseBlood($('blood').value));
     logShown = 0; $('log').innerHTML = ''; $('over').hidden = true;
+    cv.end = null; cv.all = false; setChartBtns();
     running = true; $('btnPlay').textContent = '⏸ 일시정지';
   }
   $('btnReset').addEventListener('click', reset);
@@ -371,7 +429,7 @@
     $('vComp').textContent = Math.round(sim.comp * 100) + '%';
     const cd4 = s.cd4 == null ? 1000 : s.cd4;
     const vc = $('vCd4'); vc.textContent = cd4 + '/µL'; vc.style.color = cd4 < 200 ? 'var(--bad)' : cd4 < 500 ? 'var(--warn)' : '';
-    const rbc = Math.round((s.rbc || 60) / 60 * 100);
+    const rbc = Math.round((s.rbc == null ? IMM.RBC_N : s.rbc) / IMM.RBC_N * 100);
     const vr = $('vRbc'); vr.textContent = rbc + '%'; vr.style.color = rbc < 70 ? 'var(--bad)' : '';
     $('cVirus').textContent = s.virus || 0; $('cBact').textContent = (s.bact || 0) + (s.tbIntra ? ` (+세포 안 ${Math.round(s.tbIntra)})` : '');
     $('cProt').textContent = (s.protist || 0) + (s.rbcInf ? ` (+적혈구 속 ${s.rbcInf})` : '');
@@ -424,35 +482,93 @@
     }
   }
 
-  // ───────── 항체 그래프 ─────────
+  // ───────── 항체 그래프 (처음부터 전부 기록, 끌어서 지난 기록 보기) ─────────
+  const cv = { span: 60, end: null, all: false }; // end = 보이는 오른쪽 끝(일). null이면 최신을 따라감
+  const PAD = { l: 30, r: 8, t: 10, b: 20 };
+  function chartWin() {
+    const day = sim.day;
+    if (cv.all) { const span = Math.max(20, day); return { t0: 0, t1: span, span }; }
+    const span = cv.span;
+    let t1 = cv.end == null ? Math.max(span, day) : cv.end;
+    t1 = clamp(t1, Math.min(span, Math.max(span, day)), Math.max(span, day));
+    return { t0: t1 - span, t1, span };
+  }
+  function setChartBtns() {
+    $('cAll').classList.toggle('on', cv.all);
+    $('cLive').classList.toggle('on', !cv.all && cv.end == null);
+    $('cFirst').classList.toggle('on', !cv.all && cv.end != null && cv.end <= cv.span + 0.01);
+  }
+  $('cFirst').addEventListener('click', () => { cv.all = false; cv.end = cv.span; setChartBtns(); drawChart(); });
+  $('cLive').addEventListener('click', () => { cv.all = false; cv.end = null; setChartBtns(); drawChart(); });
+  $('cAll').addEventListener('click', () => { cv.all = !cv.all; cv.end = null; setChartBtns(); drawChart(); });
+  {
+    const cp = new Map(); let g = null;
+    const plotW = () => (chart.clientWidth || 300) - PAD.l - PAD.r;
+    chart.addEventListener('pointerdown', (e) => {
+      chart.setPointerCapture(e.pointerId); cp.set(e.pointerId, e.clientX);
+      const w = chartWin();
+      if (cv.all) { cv.all = false; cv.span = w.span; }
+      if (cp.size === 1) g = { x: e.clientX, end: w.t1 };
+      else if (cp.size === 2) { const [a, b] = [...cp.values()]; g = { pinch: true, d: Math.abs(a - b) || 1, span: cv.span, end: w.t1 }; }
+    });
+    chart.addEventListener('pointermove', (e) => {
+      if (!cp.has(e.pointerId) || !g) return;
+      cp.set(e.pointerId, e.clientX);
+      if (g.pinch && cp.size >= 2) { const [a, b] = [...cp.values()]; cv.span = clamp(g.span * g.d / (Math.abs(a - b) || 1), 10, Math.max(60, sim.day)); }
+      else if (!g.pinch) {
+        const e2 = g.end - (e.clientX - g.x) / plotW() * cv.span;
+        cv.end = e2 >= sim.day - 0.05 ? null : e2;
+      }
+      setChartBtns(); drawChart();
+    });
+    const up = (e) => { cp.delete(e.pointerId); if (!cp.size) g = null; };
+    chart.addEventListener('pointerup', up); chart.addEventListener('pointercancel', up);
+    chart.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const w = chartWin();
+      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) { const e2 = w.t1 + (e.deltaX || e.deltaY) / plotW() * w.span; cv.all = false; cv.end = e2 >= sim.day - 0.05 ? null : e2; }
+      else { cv.all = false; cv.span = clamp(w.span * Math.exp(e.deltaY * 0.002), 10, Math.max(60, sim.day)); if (cv.end != null) cv.end = w.t1; }
+      setChartBtns(); drawChart();
+    }, { passive: false });
+  }
+  function niceStep(span) { for (const s of [1, 2, 5, 10, 20, 25, 50, 100, 200, 500]) if (span / s <= 7) return s; return 1000; }
   function drawChart() {
-    const w = chart.clientWidth || 300, h = Math.round(w * 0.46);
+    const w = chart.clientWidth || 300, h = Math.round(w * 0.5);
     const c = cctx; c.clearRect(0, 0, w, h);
     const css = getComputedStyle(document.documentElement);
     const muted = css.getPropertyValue('--muted').trim() || '#888', line = css.getPropertyValue('--line').trim() || '#ddd';
-    const pad = { l: 30, r: 8, t: 10, b: 20 };
-    const span = 60;
-    const t1 = Math.max(span, sim.day), t0 = t1 - span;
-    const hist = sim.hist.filter(p => p.day >= t0);
+    const pad = PAD;
+    const { t0, t1, span } = chartWin();
+    $('chartRange').textContent = `${Math.max(0, t0).toFixed(0)}–${t1.toFixed(0)}일` + (sim.day > span && !cv.all ? ` (전체 ${sim.day.toFixed(0)}일)` : '');
+    // 보이는 구간 + 양 끝 한 점씩
+    const H = sim.hist; let i0 = 0, i1 = H.length;
+    { let lo = 0, hi = H.length; while (lo < hi) { const m = (lo + hi) >> 1; if (H[m].day < t0) lo = m + 1; else hi = m; } i0 = Math.max(0, lo - 1); }
+    { let lo = 0, hi = H.length; while (lo < hi) { const m = (lo + hi) >> 1; if (H[m].day <= t1) lo = m + 1; else hi = m; } i1 = Math.min(H.length, lo + 1); }
+    const stride = Math.max(1, Math.floor((i1 - i0) / (w - pad.l - pad.r)));
+    const hist = []; for (let i = i0; i < i1; i += stride) hist.push(H[i]);
     let max = 4;
     const ids = new Set();
     for (const p of hist) for (const k in p.tit) { ids.add(k); if (p.tit[k] > max) max = p.tit[k]; }
     max = Math.ceil(max / 5) * 5;
     const X = (d) => pad.l + (d - t0) / span * (w - pad.l - pad.r);
     const Y = (v) => h - pad.b - v / max * (h - pad.t - pad.b);
+    c.save(); c.beginPath(); c.rect(pad.l, 0, w - pad.l - pad.r, h); c.clip();
     c.font = '10px "Noto Sans KR", sans-serif'; c.fillStyle = muted; c.strokeStyle = line; c.lineWidth = 1;
-    for (let i = 0; i <= 4; i++) { const v = max * i / 4; const y = Y(v); c.beginPath(); c.moveTo(pad.l, y); c.lineTo(w - pad.r, y); c.stroke(); c.textAlign = 'right'; c.fillText(v.toFixed(0), pad.l - 4, y + 3); }
+    for (let i = 0; i <= 4; i++) { const y = Y(max * i / 4); c.beginPath(); c.moveTo(pad.l, y); c.lineTo(w - pad.r, y); c.stroke(); }
     c.textAlign = 'center';
-    for (let d = Math.ceil(t0 / 10) * 10; d <= t1; d += 10) c.fillText(d + '일', X(d), h - 6);
+    const st = niceStep(span);
+    for (let d = Math.ceil(Math.max(0, t0) / st) * st; d <= t1; d += st) { c.beginPath(); c.moveTo(X(d), h - pad.b); c.lineTo(X(d), h - pad.b + 3); c.stroke(); }
     // 병원체 양 (회색 영역)
     let lmax = 1; for (const p of hist) if (p.load > lmax) lmax = p.load;
-    c.beginPath(); c.moveTo(X(hist.length ? hist[0].day : t0), Y(0));
-    for (const p of hist) c.lineTo(X(p.day), Y(p.load / lmax * max * 0.6));
-    c.lineTo(X(hist.length ? hist[hist.length - 1].day : t0), Y(0)); c.closePath();
-    c.fillStyle = 'rgba(140,140,160,0.18)'; c.fill();
+    if (hist.length) {
+      c.beginPath(); c.moveTo(X(hist[0].day), Y(0));
+      for (const p of hist) c.lineTo(X(p.day), Y(p.load / lmax * max * 0.6));
+      c.lineTo(X(hist[hist.length - 1].day), Y(0)); c.closePath();
+      c.fillStyle = 'rgba(140,140,160,0.18)'; c.fill();
+    }
     // 노출 표시
     for (const e of sim.exposures) {
-      if (e.day < t0) continue;
+      if (e.day < t0 || e.day > t1) continue;
       const x = X(e.day); c.strokeStyle = e.color; c.setLineDash([3, 3]); c.beginPath(); c.moveTo(x, pad.t); c.lineTo(x, h - pad.b); c.stroke(); c.setLineDash([]);
       c.fillStyle = e.color; c.beginPath(); c.moveTo(x - 4, pad.t); c.lineTo(x + 4, pad.t); c.lineTo(x, pad.t + 6); c.fill();
     }
@@ -463,7 +579,19 @@
       for (const p of hist) { const v = p.tit[id] || 0; const x = X(p.day), y = Y(v); if (first) { c.moveTo(x, y); first = false; } else c.lineTo(x, y); }
       c.stroke();
     }
-    // 범례
+    c.restore();
+    c.fillStyle = muted; c.font = '10px "Noto Sans KR", sans-serif'; c.textAlign = 'right';
+    for (let i = 0; i <= 4; i++) { const v = max * i / 4; c.fillText(v.toFixed(0), pad.l - 4, Y(v) + 3); }
+    c.textAlign = 'center';
+    for (let d = Math.ceil(Math.max(0, t0) / st) * st; d <= t1 + 1e-6; d += st) { const x = X(d); if (x >= pad.l - 2 && x <= w - pad.r + 2) c.fillText(d + '일', clamp(x, pad.l + 8, w - pad.r - 10), h - 6); }
+    // 전체 기록 중 보이는 위치
+    const total = Math.max(span, sim.day);
+    if (total > span + 0.5) {
+      const tw = w - pad.l - pad.r;
+      c.fillStyle = line; c.fillRect(pad.l, h - 3, tw, 3);
+      c.fillStyle = muted; c.fillRect(pad.l + Math.max(0, t0) / total * tw, h - 3, Math.max(6, span / total * tw), 3);
+    }
+    // 범례 (기록 전체에 나온 항원)
     const lg = $('chartLegend');
     const key = [...ids].join('|');
     if (lg.dataset.key !== key) {
@@ -484,9 +612,14 @@
     const cur = drag || selected;
     if (cur && hoverPos) preview = { x: hoverPos.x, y: hoverPos.y, text: `${cur.name} → ${routeText(cur, hoverPos)}` };
     const hg = cur && hoverPos && hoverPos.y < IMM.Z.tisTop ? sim.gateAt(hoverPos.x, hoverPos.y) : null;
-    applyView();
-    IMM.draw(ctx, sim, now / 1000, { labels, dropPreview: preview, hoverGate: hg, zoom: view.s });
-    panelT += dt; chartT += dt;
+    stepFly(dt);
+    IMM.draw(ctx, sim, now / 1000, { labels, dropPreview: preview, hoverGate: hg, view: viewRect(), lowQ });
+    ema += (dt - ema) * 0.05;
+    if (ema > 1 / 28) { slowT += dt; fastT = 0; } else if (ema < 1 / 50) { fastT += dt; slowT = 0; } else { slowT = 0; fastT = 0; }
+    if (!lowQ && slowT > 2) { lowQ = true; slowT = 0; fitCanvas(); }
+    else if (lowQ && fastT > 8 && (window.devicePixelRatio || 1) > 1) { lowQ = false; fastT = 0; fitCanvas(); }
+    panelT += dt; chartT += dt; miniT += dt;
+    if (miniT > 0.25) { miniT = 0; drawMini(); }
     if (panelT > 0.2) { panelT = 0; updatePanel(); }
     if (chartT > 0.5) { chartT = 0; drawChart(); }
     requestAnimationFrame(frame);
@@ -494,7 +627,7 @@
 
   IMM.app = { get sim() { return sim; } }; // 디버깅용
   buildPalette(); buildLegend(); fitCanvas(); updatePanel(); drawChart();
-  if (window.ResizeObserver) new ResizeObserver(() => { if (!big) fitCanvas(); }).observe($('canvasWrap'));
+  if (window.ResizeObserver) { let lastW = 0; new ResizeObserver(() => { const w = $('canvasWrap').parentElement.clientWidth; if (!big && Math.abs(w - lastW) > 1) { lastW = w; fitCanvas(); } }).observe($('canvasWrap').parentElement); }
   // 좁은 화면에서는 기록·기억 패널을 접어서 시작
   if (window.matchMedia('(max-width: 820px)').matches) document.querySelectorAll('details[data-k="log"], details[data-k="mem"]').forEach(d => { d.open = false; });
   document.querySelectorAll('details[data-k="chart"]').forEach(d => d.addEventListener('toggle', () => { if (d.open) { fitCanvas(); drawChart(); } }));

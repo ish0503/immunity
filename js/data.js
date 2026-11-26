@@ -2,35 +2,45 @@
 (function (G) {
   const IMM = (G.IMM = G.IMM || {});
 
-  IMM.W = 1200;
-  IMM.H = 780;
+  // ───────── 몸 지도 (단면) ─────────
+  // 예전보다 가로 2.5배·세로 약 2배 넓은 지도. 세포 수는 K배로 늘리고,
+  // 세포 하나하나가 몸 전체에 주는 영향(손상·염증·자극)은 1/K로 맞춰 균형을 유지한다.
+  IMM.K = 4;
+  IMM.W = 3000;
+  IMM.H = 1500;
   // 세로 구역
   IMM.Z = {
     outTop: 0,
-    barTop: 62,   // 1차 방어벽(피부·점막) 시작
-    tisTop: 100,  // 조직
-    bloodTop: 420, // 혈관
-    bloodBot: 540,
-    lnTop: 560,   // 림프절·비장
-    bot: 780,
+    barTop: 80,    // 1차 방어벽(피부·점막) 시작
+    tisTop: 140,   // 조직(진피·점막 고유층)
+    bloodTop: 740, // 큰 혈관
+    bloodBot: 920,
+    lnTop: 980,    // 깊은 기관: 림프절·비장·간
+    bot: 1500,
   };
+  IMM.TIS_X1 = 2520; // 상피가 덮는 구역의 오른쪽 끝 (그 오른쪽은 혈관 직접 투입 구역)
 
   IMM.GATES = [
-    { id: 'skin', name: '피부', sub: '각질층 · 피지 · 땀(라이소자임)', x0: 0, x1: 300 },
-    { id: 'wound', name: '상처', sub: '피부 장벽이 뚫린 곳', x0: 300, x1: 470 },
-    { id: 'resp', name: '호흡기 점막', sub: '점액 · 섬모 · 라이소자임', x0: 470, x1: 760 },
-    { id: 'gut', name: '소화관 (위)', sub: '위산 pH 2 · 장 점막', x0: 760, x1: 1000 },
-    { id: 'blood', name: '혈관 직접', sub: '주사 · 수혈 · 모기', x0: 1000, x1: 1200 },
+    { id: 'skin', name: '피부', sub: '각질층 · 피지 · 땀(라이소자임) · 털집', x0: 0, x1: 760 },
+    { id: 'wound', name: '상처', sub: '피부 장벽이 뚫린 곳 · 혈소판 응고', x0: 760, x1: 1180 },
+    { id: 'resp', name: '호흡기 점막 (기관지)', sub: '점액 · 섬모 · 술잔세포 · 라이소자임', x0: 1180, x1: 1900 },
+    { id: 'gut', name: '소화관 (위 → 작은창자)', sub: '위산 pH 2 · 소화 효소 · 융모', x0: 1900, x1: 2520 },
+    { id: 'blood', name: '혈관 직접', sub: '주사 · 수혈 · 모기', x0: 2520, x1: 3000 },
   ];
 
   // 특수 장소
-  IMM.LIVER = { x: 1100, y: 300, r: 60 };
-  IMM.GANGLION = { x: 75, y: 360 };
+  IMM.LIVER = { x: 2760, y: 1240, r: 190 };
+  IMM.SPLEEN = { x: 2265, y: 1240, rx: 200, ry: 210 };
+  IMM.MARROW = { x: 2760, y: 520, rx: 190, ry: 130 }; // 뼈 속 골수: 새 혈구가 혈액으로 나옴
+  IMM.GANGLION = { x: 200, y: 640 };
+  IMM.LNODE = { x: 1010, y: 1240, rx: 965, ry: 235 }; // 림프절 외곽(피막)
   IMM.LN = {
-    tZone: { x0: 30, x1: 520, y0: 595, y1: 765 },
-    bZone: { x0: 545, x1: 880, y0: 595, y1: 765 },
-    pZone: { x0: 905, x1: 1180, y0: 595, y1: 765 },
+    bZone: { x0: 200, x1: 1820, y0: 1035, y1: 1150 }, // 피질: B세포 여포
+    tZone: { x0: 170, x1: 1490, y0: 1185, y1: 1440 }, // 부피질: T세포 영역
+    pZone: { x0: 1530, x1: 1900, y0: 1185, y1: 1440 }, // 수질: 형질세포
   };
+  // 조직에서 림프절로 가는 림프관(수지상세포가 이 길을 따라 이동)
+  IMM.LYMPH_X = [330, 980, 1560, 2180];
 
   // 항원(에피토프) 이름
   IMM.AG_NAMES = {
@@ -107,10 +117,10 @@
 
     // 세균
     { id: 'staph', cat: 'bact', name: '황색포도상구균', ag: 'staph', n: 16, beh: 'bact', route: 'wound', gram: '+',
-      dbl: 0.55, tox: 0.02, skinPass: 0.05, toxNeutro: 0.15, cap: 260, color: '#ffb224',
+      dbl: 0.55, tox: 0.023, skinPass: 0.05, toxNeutro: 0.15, cap: 260, color: '#ffb224',
       desc: '피부 상처로 들어오는 그람 양성 구균. 호중구를 죽이는 독소(류코시딘)를 내고 고름(농양)을 만듦. 상처 없는 피부는 거의 못 뚫음.' },
     { id: 'pneumo', cat: 'bact', name: '폐렴구균 (협막)', ag: 'pneumo', n: 16, beh: 'bact', route: 'resp', gram: '+',
-      dbl: 0.6, tox: 0.02, capsule: true, cap: 260, color: '#0090ff',
+      dbl: 0.6, tox: 0.027, capsule: true, cap: 260, color: '#0090ff',
       desc: '두꺼운 다당류 협막 때문에 그냥은 잘 잡아먹히지 않음. 항체가 붙어 옵소닌화되어야 효과적으로 탐식됨 → 항체의 중요성.' },
     { id: 'salm', cat: 'bact', name: '살모넬라균', ag: 'salm', n: 30, beh: 'bact', route: 'gut', gram: '-',
       dbl: 0.45, tox: 0.016, lps: true, cap: 260, color: '#ab4aba',
