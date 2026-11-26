@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>면역 실험실</title>
+  <meta name="description" content="항원을 몸속에 직접 넣고 외부 방어, 선천 면역, 특이적(적응) 면역이 어떻게 반응하는지 관찰하는 면역 시뮬레이션 게임">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 30V16M16 16 6 4M16 16 26 4' stroke='%235eb1ef' stroke-width='4' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <h1>면역 실험실</h1>
+      <p>항원을 끌어다 몸속에 넣고, 겹겹이 짜인 면역 체계가 어떻게 싸우는지 지켜보세요.</p>
+    </div>
+    <div class="controls" role="toolbar" aria-label="시뮬레이션 조작">
+      <button id="btnPlay" class="btn primary" type="button">⏸ 일시정지</button>
+      <div class="seg" id="speedSeg" role="group" aria-label="속도">
+        <button type="button" data-speed="1" class="on">1×</button>
+        <button type="button" data-speed="2">2×</button>
+        <button type="button" data-speed="4">4×</button>
+        <button type="button" data-speed="8">8×</button>
+      </div>
+      <label class="field">투입량
+        <select id="dose">
+          <option value="0.5">적게</option>
+          <option value="1" selected>보통</option>
+          <option value="4">많이</option>
+          <option value="20">압도적</option>
+        </select>
+      </label>
+      <label class="field">혈액형
+        <select id="blood">
+          <option>A+</option><option>A−</option><option>B+</option><option>B−</option>
+          <option>AB+</option><option>AB−</option><option selected>O+</option><option>O−</option>
+        </select>
+      </label>
+      <button id="btnReset" class="btn" type="button">새 몸으로 시작</button>
+      <button id="btnLabels" class="btn ghost" type="button" aria-pressed="true">라벨 끄기</button>
+      <button id="btnHelp" class="btn ghost" type="button">도움말</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="palette" aria-label="항원 목록">
+      <div class="palette-head">
+        <h2>항원 상자</h2>
+        <p>카드를 끌어 원하는 침입 경로(피부·상처·점막·위·혈관)에 놓으세요. 카드를 누른 뒤 화면을 눌러도 됩니다.</p>
+      </div>
+      <div id="paletteList"></div>
+    </aside>
+
+    <section class="stage">
+      <div class="stage-bar">
+        <span id="dayLabel" class="day">0.0일째</span>
+        <span id="statusLabel" class="status ok">정상</span>
+        <span id="hint" class="hint"></span>
+      </div>
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="world" width="1200" height="780" aria-label="몸속 면역 시뮬레이션 화면"></canvas>
+        <div id="tooltip" class="tooltip" hidden></div>
+        <div id="over" class="over" hidden>
+          <div class="over-card">
+            <h2>면역 체계 붕괴</h2>
+            <p id="overReason"></p>
+            <p id="overDay" class="muted"></p>
+            <button id="btnRestart" class="btn primary" type="button">새 몸으로 다시 시작</button>
+          </div>
+        </div>
+      </div>
+      <div class="legend" id="legend" aria-label="범례"></div>
+    </section>
+
+    <aside class="panel" aria-label="몸 상태">
+      <section class="card">
+        <h2>몸 상태</h2>
+        <div class="vital">
+          <div class="vrow"><span>건강</span><b id="vHealth">100</b></div>
+          <div class="bar"><i id="bHealth"></i></div>
+        </div>
+        <div class="vgrid">
+          <div><span>체온</span><b id="vTemp">36.5℃</b></div>
+          <div><span>염증</span><b id="vInflam">0%</b></div>
+          <div><span>인터페론</span><b id="vIfn">0%</b></div>
+          <div><span>보체</span><b id="vComp">100%</b></div>
+          <div><span>CD4 T세포</span><b id="vCd4">1000/µL</b></div>
+          <div><span>적혈구</span><b id="vRbc">100%</b></div>
+        </div>
+        <div class="vgrid small">
+          <div><span>바이러스</span><b id="cVirus">0</b></div>
+          <div><span>세균</span><b id="cBact">0</b></div>
+          <div><span>원생생물</span><b id="cProt">0</b></div>
+          <div><span>감염 세포</span><b id="cInf">0</b></div>
+          <div><span>호중구</span><b id="cNeut">0</b></div>
+          <div><span>대식세포</span><b id="cMacro">0</b></div>
+          <div><span>NK세포</span><b id="cNk">0</b></div>
+          <div><span>세포독성 T</span><b id="cCtl">0</b></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>항체 농도 <small>(1차 vs 2차 면역 반응)</small></h2>
+        <canvas id="chart" width="560" height="260" aria-label="항원별 항체 농도 그래프"></canvas>
+        <div id="chartLegend" class="chart-legend"></div>
+      </section>
+
+      <section class="card">
+        <h2>기억 세포</h2>
+        <div id="memList" class="mem-list"><p class="muted">아직 없음. 항원을 넣고 면역 반응이 끝나면 기억 세포가 남습니다.</p></div>
+      </section>
+
+      <section class="card grow">
+        <h2>면역 반응 기록</h2>
+        <ol id="log" class="log" aria-live="polite"></ol>
+      </section>
+    </aside>
+  </main>
+
+  <div id="ghost" class="drag-ghost" hidden></div>
+
+  <dialog id="help">
+    <form method="dialog">
+      <h2>면역 실험실 사용법</h2>
+      <p>왼쪽 <b>항원 상자</b>에서 적혈구·바이러스·세균·원생생물·백신 카드를 끌어 화면 위쪽의 <b>침입 경로</b>에 놓으면, 몸이 단계별로 반응합니다.</p>
+      <ol>
+        <li><b>1차 방어 (외부 장벽)</b> — 피부 각질층, 점액과 섬모, 위산, 라이소자임이 대부분을 막습니다. 상처나 혈관으로 넣으면 장벽을 건너뜁니다.</li>
+        <li><b>2차 방어 (선천 면역)</b> — 비만세포의 히스타민으로 염증이 생기고 호중구·대식세포가 몰려와 탐식합니다. 보체가 세균에 구멍을 뚫고, 감염 세포는 인터페론을 내며, NK세포가 이상한 세포를 제거합니다. 발열도 일어납니다.</li>
+        <li><b>3차 방어 (특이적 면역)</b> — 수지상세포가 항원을 림프절로 가져가 MHC II로 보조 T세포에 제시합니다. 보조 T세포의 도움으로 B세포가 형질세포가 되어 항체를 만들고, 세포독성 T세포는 MHC I로 감염 세포를 찾아 죽입니다.</li>
+        <li><b>기억과 2차 반응</b> — 반응이 끝나면 기억 B·T세포가 남습니다. 같은 항원을 다시 넣으면 오른쪽 그래프처럼 훨씬 빠르고 강한 반응이 일어납니다.</li>
+      </ol>
+      <p>해볼 만한 실험: 같은 병원체 두 번 넣기 · 백신을 먼저 맞고 감염시키기 · O형 몸에 A형 적혈구 수혈 · Rh− 몸에 Rh+ 적혈구 두 번 수혈 · 인플루엔자 변이 · HIV로 보조 T세포가 무너지는 과정 · ‘압도적’ 투입량으로 면역 붕괴시키기.</p>
+      <p class="muted">화면 속 세포나 병원체 위에 마우스를 올리면 설명이 나옵니다. 실제 면역 체계를 단순화한 교육용 모델이며, 시간은 1배속에서 1초 ≈ 0.4일입니다.</p>
+      <div class="dialog-actions"><button class="btn primary" value="ok">시작하기</button></div>
+    </form>
+  </dialog>
+
+  <script src="js/data.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/ui.js"></script>
+</body>
+</html>
