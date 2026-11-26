@@ -19,6 +19,8 @@
     </div>
     <div class="controls" role="toolbar" aria-label="시뮬레이션 조작">
       <button id="btnPlay" class="btn primary" type="button">⏸ 일시정지</button>
+      <button id="btnBig" class="btn" type="button" aria-pressed="false">⛶ 크게 보기</button>
+      <button id="btnPalette" class="btn only-big" type="button" aria-pressed="true">항원 상자 숨기기</button>
       <div class="seg" id="speedSeg" role="group" aria-label="속도">
         <button type="button" data-speed="1" class="on">1×</button>
         <button type="button" data-speed="2">2×</button>
@@ -46,10 +48,11 @@
   </header>
 
   <main class="layout">
-    <aside class="palette" aria-label="항원 목록">
+    <aside class="palette" id="paletteDock" aria-label="항원 목록">
       <div class="palette-head">
         <h2>항원 상자</h2>
         <p>카드를 끌어 원하는 침입 경로(피부·상처·점막·위·혈관)에 놓으세요. 카드를 누른 뒤 화면을 눌러도 됩니다.</p>
+        <p class="touch-hint">카드를 누르고 화면을 톡 → 투입 · 두 손가락으로 확대·이동</p>
       </div>
       <div id="paletteList"></div>
     </aside>
@@ -58,11 +61,17 @@
       <div class="stage-bar">
         <span id="dayLabel" class="day">0.0일째</span>
         <span id="statusLabel" class="status ok">정상</span>
+        <span id="mini" class="mini"></span>
         <span id="hint" class="hint"></span>
       </div>
       <div class="canvas-wrap" id="canvasWrap">
         <canvas id="world" width="1200" height="780" aria-label="몸속 면역 시뮬레이션 화면"></canvas>
         <div id="tooltip" class="tooltip" hidden></div>
+        <div class="zoom" role="group" aria-label="확대·축소">
+          <button type="button" id="zIn" aria-label="확대">＋</button>
+          <button type="button" id="zOut" aria-label="축소">－</button>
+          <button type="button" id="zFit" aria-label="전체 보기">⤢</button>
+        </div>
         <div id="over" class="over" hidden>
           <div class="over-card">
             <h2>면역 체계 붕괴</h2>
@@ -76,8 +85,8 @@
     </section>
 
     <aside class="panel" aria-label="몸 상태">
-      <section class="card">
-        <h2>몸 상태</h2>
+      <details class="card" open data-k="vitals">
+        <summary><h2>몸 상태</h2></summary>
         <div class="vital">
           <div class="vrow"><span>건강</span><b id="vHealth">100</b></div>
           <div class="bar"><i id="bHealth"></i></div>
@@ -100,23 +109,23 @@
           <div><span>NK세포</span><b id="cNk">0</b></div>
           <div><span>세포독성 T</span><b id="cCtl">0</b></div>
         </div>
-      </section>
+      </details>
 
-      <section class="card">
-        <h2>항체 농도 <small>(1차 vs 2차 면역 반응)</small></h2>
+      <details class="card" open data-k="chart">
+        <summary><h2>항체 농도 <small>(1차 vs 2차 면역 반응)</small></h2></summary>
         <canvas id="chart" width="560" height="260" aria-label="항원별 항체 농도 그래프"></canvas>
         <div id="chartLegend" class="chart-legend"></div>
-      </section>
+      </details>
 
-      <section class="card">
-        <h2>기억 세포</h2>
+      <details class="card" open data-k="mem">
+        <summary><h2>기억 세포</h2></summary>
         <div id="memList" class="mem-list"><p class="muted">아직 없음. 항원을 넣고 면역 반응이 끝나면 기억 세포가 남습니다.</p></div>
-      </section>
+      </details>
 
-      <section class="card grow">
-        <h2>면역 반응 기록</h2>
+      <details class="card grow" open data-k="log">
+        <summary><h2>면역 반응 기록</h2></summary>
         <ol id="log" class="log" aria-live="polite"></ol>
-      </section>
+      </details>
     </aside>
   </main>
 
